@@ -1,0 +1,5 @@
+node_modules/
+dist/
+
+# screenshots from scripts/shot.mjs and friends
+out/

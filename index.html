@@ -1,0 +1,815 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>B.A.D.</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22><text y=%2213%22 font-size=%2213%22>%F0%9F%91%81%EF%B8%8F</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* The display face for the big lettering. Public domain; dropped into
+     public/fonts by hand -- see the README there. If it is absent the rules
+     below fall back to the interface mono and nothing breaks. */
+  @font-face {
+    font-family: 'Pixel Display';
+    src: url('fonts/GoodLookingFont.ttf') format('truetype');
+    font-display: block;
+  }
+  :root {
+    color-scheme: dark;
+    /* The game's own ramps, black to light. Violet is the player's, grey is
+       structure, red is danger. */
+    --v-dim:  #48388D;
+    --v-mid:  #9B8FD0;
+    --v-lit:  #C4BCE3;
+    --v-max:  #DEDEEE;
+    --g-dim:  #2A2A2A;
+    --g-mid:  #6D6D6D;
+    /* The border plus the padding on one side of the field's frame. */
+    --frame-edge: 4px;
+    --g-lit:  #A8A8A8;
+    --g-max:  #DEDEDE;
+    --r-mid:  #752C2C;
+    --r-lit:  #E2C2C2;
+    --bg:     #000;
+    /* The HUD is drawn at one design width and *zoomed* to match the field, and
+       the middle column is the field's measured width. Both are set from JS in
+       `resize`. Sized off the viewport instead, the three columns spread to the
+       window's edges and the HUD ends up marooned a foot from the picture it
+       describes -- and on a 4K screen it stays postage-stamp sized beside it.
+       These are the fallbacks for the first paint. */
+    --col-w: 140px;
+    --ui: 1;
+    --field-w: minmax(0, 1fr);
+    --mono:  'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    /* The grid the display face is drawn on. GoodLookingFont has em = 1000 and
+       lays its cells out on 100 units, with advances of 200, 400, 600 and 800,
+       so a cell is a whole number of screen pixels only at sizes that are
+       multiples of ten. Every display size below is a whole multiple of this;
+       in between, the glyph grid lands on fractions and fringes. */
+    --pix-unit: 10px;
+  }
+  * { box-sizing: border-box; }
+  /* The page is an instrument panel, not a document: it is exactly the window
+     and it never scrolls. `min-height` let the grid grow whenever anything --
+     a font arriving and making the head taller, a scrollbar taking width and
+     squeezing the columns -- pushed the content over, and once a scrollbar
+     exists it takes width, which can push it over again. Pinning the height
+     ends the whole class of problem instead of chasing each cause. */
+  html { height: 100%; overflow: hidden; }
+  body {
+    margin: 0; height: 100dvh; overflow: hidden; color: var(--g-max);
+    /* The nebula is generated once into a data URL (src/backdrop.js) and set
+       on this variable; until then, and if generation fails, plain black. */
+    background: var(--bg) var(--sky, none) center / cover no-repeat fixed;
+    font: 400 12px/1.4 var(--mono); font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+    display: grid; grid-template-rows: auto 1fr auto; gap: 10px; padding: 12px;
+  }
+  /* Head and foot line up with the three columns below them and scale with
+     them, so the page reads as one instrument rather than a picture with
+     captions floating at the window's edges. */
+  header, footer { width: var(--shell-w, auto); margin-inline: auto; zoom: var(--ui, 1); }
+  header { display: flex; align-items: center; gap: 16px; padding: 4px 2px 10px; }
+  #logo {
+    width: 46px; height: 46px; flex: 0 0 auto;
+    border: 1px solid var(--g-mid); display: grid; place-items: center;
+    color: #3a3a3a; font-size: 8px; letter-spacing: .1em;
+    clip-path: polygon(6px 0, calc(100% - 6px) 0, 100% 6px, 100% calc(100% - 6px),
+                       calc(100% - 6px) 100%, 6px 100%, 0 calc(100% - 6px), 0 6px);
+  }
+  /* Once the ship is in it, the box stops being a box: no frame, no clip, and
+     room for the glow to spill. The mark is the ship, not a plate with a ship
+     on it. */
+  #logo[data-ship="1"] {
+    width: 58px; height: 52px; border: 0; clip-path: none;
+    position: relative; overflow: visible;
+    /* The engine, behind everything: a violet bloom under the tail and a
+       narrow wash of exhaust running back off the bottom edge. Both are
+       painted once -- see the note on the panel sheen -- so this costs a
+       gradient at layout time and nothing per frame. */
+    background:
+      radial-gradient(38% 26% at 52% 78%, rgba(155,143,208,.55), transparent 70%),
+      radial-gradient(62% 45% at 52% 88%, rgba(72,56,141,.38), transparent 72%);
+  }
+  /* A real banked frame of the real sprite, leaned further than the strip goes:
+     a mark should read as going somewhere, and up-and-right is where things go.
+     Rotated rather than mirrored, so the perspective stays as drawn -- the far
+     wing narrow, the near one wide -- and the ship banks onto the other side. */
+  #logo[data-ship="1"] canvas, #logo[data-ship="1"] img {
+    transform: rotate(17deg) translateY(-2px);
+    filter: drop-shadow(0 0 5px rgba(155,143,208,.5))
+            drop-shadow(0 1px 0 rgba(0,0,0,.8));
+    image-rendering: pixelated;
+  }
+  #logo[data-ship="1"] img { height: 40px; width: auto; }
+  /* No speed lines. They read as a thin white scratch at this size, which is
+     not what a mark should have in it. */
+  .titles { display: flex; flex-direction: column; gap: 5px; }
+  /* The sound switch. Same two-box metal as the shop button and the medals, so
+     it reads as part of the same instrument rather than as a web control. */
+  #sound, #hires {
+    display: flex; align-items: center; gap: 8px;
+    background: none; border: 0; padding: 0; cursor: pointer; font: inherit;
+    color: var(--v-lit);
+  }
+  /* The picture switch comes first and the sound switch is always last, on the
+     right-hand edge, where a mute has been since the first media player. */
+  #hires { margin-left: auto; }
+  /* No frame: the panels wear metal because they are instruments, and this is
+     a switch on the page, not one of them. */
+  #sound .spk, #hires .spk { display: flex; align-items: center; justify-content: center; }
+  #sound kbd, #hires kbd { font: 600 9px/1 var(--mono); color: var(--g-lit);
+               border: 1px solid var(--g-mid); padding: 2px 4px; }
+  #sound:hover, #hires:hover { color: var(--v-max); }
+  #sound:hover kbd, #hires:hover kbd { color: var(--g-max); border-color: var(--g-max); }
+  /* Off: the icon greys out and the key cap stops looking live. */
+  #sound[aria-pressed="false"], #hires[aria-pressed="false"] { color: #55525f; }
+  #sound[aria-pressed="false"] kbd, #hires[aria-pressed="false"] kbd {
+    color: #55525f; border-color: #3a3843;
+  }
+  h1 {
+    margin: 0; font-size: calc(var(--pix-unit) * 3); font-weight: 600;
+    letter-spacing: 6px; line-height: 1; color: var(--v-max);
+  }
+  .sub { font-size: 9px; letter-spacing: .22em; color: var(--g-mid); }
+  #stats {
+    color: #4a4a4a; font-size: 10px; letter-spacing: .04em;
+    margin-left: auto; align-self: flex-end;
+  }
+
+  /* ---- the frame: panel | field | panel ------------------------------ */
+  #stage {
+    display: grid; grid-template-columns: auto var(--field-w) auto;
+    /* The columns cluster in the middle rather than filling the row, so the
+       panels stay against the field however wide the window gets. */
+    justify-content: center;
+    align-items: stretch; gap: clamp(10px, 2vw, 34px);
+    min-height: 0;
+  }
+  .field-wrap {
+    position: relative; display: flex; flex-direction: column;
+    align-items: center; justify-content: flex-start;
+    gap: 7px; min-height: 0; min-width: 0;
+  }
+  canvas { display: block; image-rendering: pixelated; }
+  /* `pixelated` at every setting, including the hi one. Letting the browser
+     resample there was tried and it reads as a blur: the point of the baked
+     sprites is that they are drawn with more pixels, not that the edges go
+     soft, and the edges are the half of pixel art that has to stay hard. */
+  /* A box around the canvas rather than a border on it. This was tried as a
+     performance fix -- decoration on a canvas can stop the browser handing its
+     buffer straight to the compositor -- and measured: it is worth two or three
+     frames a second at most, inside the noise. Kept because it is tidier, not
+     because it is faster. */
+  /* The same metal the medals wear, for the same reason: an outer box holding
+     the gradient and the field inside it. `--frame-edge` is what the border and
+     the padding come to on one side, and `resize` subtracts it -- a magic 2 in
+     there was the old 1px border, and it has to stay in step. */
+  .frame {
+    position: relative; padding: 3px; border: 1px solid #0c0b11;
+    /* Conic, not linear. A medal is 20 px across, so one linear sweep reads as
+       metal on all four of its sides; over a field a thousand px wide the same
+       sweep gives each edge a single flat tone and the left one lands almost on
+       the background. A conic gradient turns *around* the box instead, so every
+       side gets its own tone and the corners are where they change -- which is
+       what a bevel is. */
+    background: conic-gradient(from 200deg at 50% 50%,
+      #cfcbd8 0deg, #9a97a8 50deg, #56535f 130deg, #4e4c58 180deg,
+      #7c7987 250deg, #bab6c6 310deg, #d2ced9 360deg);
+    line-height: 0; font-size: 0;
+  }
+  /* Scanlines and a vignette, as one static composited layer rather than a
+     shader pass: the veil is drawn at display resolution and the compositor
+     does that for free. `?crt=1` puts it on.
+
+     The line pitch is `--scan`, which `resize` sets to the height of one
+     *source* row on screen -- the field's own 350, not the buffer's 350 or
+     700. A scanline belongs to the display being imitated, so it must not
+     change when the H switch doubles the buffer; pinning it to 3 CSS pixels
+     instead, which is what this was, meant the veil drifted out of step with
+     the picture on every window size.
+
+     And it is a soft triangular wave rather than a hard 1px bar. At roughly
+     two display pixels to a row there is no way to draw a hard line without
+     beating against the pixel grid, and the moire that produces is worse than
+     no veil at all. Half intensity throughout: the bars average 6% where they
+     were 11, and the vignette is 28% where it was 55. */
+  .frame::after {
+    content: ''; position: absolute; inset: var(--frame-edge); pointer-events: none;
+    background:
+      radial-gradient(130% 110% at 50% 50%, transparent 52%,
+                      rgba(0,0,0,calc(.28 * var(--crt-gain, 1))) 100%),
+      repeating-linear-gradient(180deg,
+        rgba(0,0,0,calc(.12 * var(--crt-gain, 1))) 0,
+        rgba(0,0,0,0) calc(var(--scan, 3px) * .5),
+        rgba(0,0,0,calc(.12 * var(--crt-gain, 1))) var(--scan, 3px));
+  }
+  body[data-crt="0"] .frame::after { display: none; }
+  /* `zoom`, not `transform`: a transform would leave the column's layout width
+     where it was and the field would not know the HUD had grown. */
+  .col {
+    display: flex; flex-direction: column; gap: 14px; height: 100%;
+    width: var(--col-w); zoom: var(--ui);
+  }
+  .col > :last-child { margin-top: auto; }
+
+  /* ---- panels -------------------------------------------------------- */
+  /* Two nested boxes with the same chamfer: the outer is the border colour, the
+     inner is the fill. Clipping an actual CSS border cuts its own corners off.
+     The cut is on one diagonal only, and the two panels mirror each other. */
+  .cut-a, .cut-a .panel-in {          /* left: top-right and bottom-left */
+    clip-path: polygon(0 0, calc(100% - 11px) 0, 100% 11px, 100% 100%,
+                       11px 100%, 0 calc(100% - 11px));
+  }
+  .cut-b, .cut-b .panel-in {          /* right: top-left and bottom-right */
+    clip-path: polygon(11px 0, 100% 0, 100% calc(100% - 11px), calc(100% - 11px) 100%,
+                       0 100%, 0 11px);
+  }
+  /* Whatever changes inside a panel stays inside it. */
+  /* The frame is two pixels of bevelled metal: light where a light above would
+     catch it, dark where it would not. */
+  .panel {
+    padding: 2px; contain: layout style; isolation: isolate;
+    background: linear-gradient(150deg, #8e88a8 0%, #4a4759 26%, #2b2a36 55%,
+                                        #5a5668 82%, #9a94b4 100%);
+  }
+  /* ...and a highlight that drifts across it, once every twenty seconds. It
+     rides above the frame and below the panel's own face, so it only ever
+     shows on the two-pixel edge. */
+  .panel::after {
+    content: ''; position: absolute; inset: -40%; z-index: 0; pointer-events: none;
+    background: linear-gradient(115deg, transparent 38%, rgba(255,255,255,.34) 50%,
+                                        transparent 62%);
+    /* Off by default -- `?sheen=1` turns it on. Even stepped, on a real GPU it
+       was worth a third of the frame rate: the panel's `clip-path` stops the
+       browser compositing the transform, so it repaints the clipped content
+       instead. To come back to during the final polish, probably as a baked
+       texture rather than a live gradient. */
+    animation: none;
+  }
+  @keyframes sheen {
+    from { transform: translate3d(-60%, -60%, 0); }
+    to   { transform: translate3d(60%, 60%, 0); }
+  }
+  body[data-sheen="1"] .panel::after {
+    animation: sheen 20s steps(48) infinite; will-change: transform;
+  }
+  @media (prefers-reduced-motion: reduce) { .panel::after { animation: none; } }
+  .readout, .money, .progress { contain: layout style; }
+  .panel-in {
+    position: relative; z-index: 1;
+    background:
+      /* The scanline texture the concept has inside the panel, under the
+         content but over the sky -- which now shows through. */
+      repeating-linear-gradient(180deg, rgba(0,0,0,.06) 0 1px, transparent 1px 3px),
+      radial-gradient(120% 80% at 50% 0%, rgba(72,56,141,.22), transparent 70%),
+      linear-gradient(180deg, rgba(18,18,27,.62) 0%, rgba(11,11,17,.68) 42%,
+                              rgba(8,8,13,.74) 100%);
+  }
+  .panel-head {
+    display: flex; align-items: center; gap: 8px;
+    /* Tall enough that the lamp in the top edge clears the title, no more. */
+    padding: 8px 11px 7px; font-size: 11px; letter-spacing: .2em; color: var(--g-max);
+    background: color-mix(in srgb, var(--v-dim) 35%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--v-mid) 50%, transparent);
+  }
+  .panel-head { position: relative; }
+  .panel-head .tag { margin-left: auto; color: var(--v-mid); font-size: 11px; }
+  /* Round, and lit from above: a highlight on the top half, a shadow under. */
+  .rivet {
+    position: absolute; width: 4px; height: 4px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #e6e1f4 0%, #a49dc0 55%, #55506a 100%);
+    box-shadow: 0 1px 0 rgba(0,0,0,.65);
+  }
+  .rivet.tl { left: 5px; top: 5px; }   .rivet.tr { right: 5px; top: 5px; }
+  .rivet.bl { left: 5px; bottom: 5px; } .rivet.br { right: 5px; bottom: 5px; }
+  /* Only the header's *top* corners sit on the panel's, so only one of them can
+     land on a chamfer. That rivet slides down the edge until it is past the cut
+     -- which also keeps it clear of the title, where stepping it inwards along
+     the diagonal put it. */
+  .cut-a .rivet.tr { right: 5px; top: 12px; }
+  .cut-b .rivet.tl { left: 5px; top: 12px; }
+  /* Off to one side, not centred -- an instrument panel is not symmetrical. */
+  .led {
+    position: absolute; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 3px;
+    padding: 0 6px 1px; font-size: 6px; letter-spacing: .12em; white-space: nowrap;
+    background: #0d0d14; border: 1px solid rgba(155,143,208,.45);
+    clip-path: polygon(4px 0, calc(100% - 4px) 0, 100% 50%, calc(100% - 4px) 100%,
+                       4px 100%, 0 50%);
+  }
+  .led.top { top: -1px; left: 64%; }
+  .led.bottom { bottom: -1px; left: 40%; }
+  .led i { width: 4px; height: 2px; }
+  .led.ok  { color: #7fd6a0; } .led.ok i  { background: #4ec97f; box-shadow: 0 0 4px #4ec97f; }
+  .led.link { color: #86b6e6; } .led.link i { background: #4f9de0; box-shadow: 0 0 4px #4f9de0; }
+  .panel-body { display: flex; flex-direction: column; gap: 13px; padding: 12px 10px 14px; }
+
+  .k {
+    font-size: 9px; letter-spacing: .14em; color: var(--g-lit);
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  /* The same height as the letters beside them, as in the concept. */
+  .k svg { opacity: .8; }
+  .v { font-size: 9px; letter-spacing: .06em; color: var(--v-lit); margin-left: auto; }
+
+  .meter { display: flex; flex-direction: column; gap: 4px; }
+  .meter-h { display: flex; align-items: baseline; gap: 6px; }
+  .cells { display: flex; gap: 2px; }
+  .cells i {
+    flex: 1; height: 5px;
+    background:
+      repeating-linear-gradient(180deg, rgba(0,0,0,.16) 0 1px, transparent 1px 2px),
+      linear-gradient(180deg, #4b4959 0%, #35333f 55%, #26252f 100%);
+  }
+  .cells i[data-on="1"] {
+    background:
+      repeating-linear-gradient(180deg, rgba(0,0,0,.18) 0 1px, transparent 1px 2px),
+      linear-gradient(180deg, #cfc7ea 0%, var(--v-mid) 40%, #6f63a6 100%);
+  }
+  .pips .cells i { height: 4px; }
+  /* One cell per hit point, so they are hairlines and the gaps go. */
+  .hull .cells { gap: 1px; }
+  .hull .cells i { height: 7px; }
+  .hull[data-low="1"] .cells i[data-on="1"] {
+    background: linear-gradient(180deg, #f2d2d2 0%, var(--r-lit) 40%, #9b5a5a 100%);
+  }
+  .wide .cells { gap: 3px; }
+  .wide .cells i { height: 6px; }
+  /* A gauge that widens as it climbs, the way the concept has it. */
+  .notch .cells i:nth-child(1) { flex: 3; } .notch .cells i:nth-child(2) { flex: 4; }
+  .notch .cells i:nth-child(3) { flex: 5; } .notch .cells i:nth-child(4) { flex: 6; }
+  .notch .cells i:nth-child(5) { flex: 7; } .notch .cells i:nth-child(6) { flex: 8; }
+  .notch .cells i:nth-child(7) { flex: 9; }
+  .notch .cells i { height: 7px; }
+  /* A gauge that climbs: each notch is taller than the last. */
+
+  /* The fill is scaled, not resized: a width in percent makes the browser lay
+     the page out again, a transform does not. */
+  .track { position: relative; height: 5px; background: var(--g-dim); overflow: hidden; }
+  .track i {
+    position: absolute; inset: 0; background: var(--v-lit);
+    transform-origin: left center; will-change: transform;
+  }
+  .track[data-low="1"] i { background: var(--r-lit); }
+
+  /* ---- the Pseudos intro ------------------------------------------------
+     640x480 sixteen-colour art from the original's front end, which is not the
+     shape of anything else here, so it gets the whole window and is letterboxed
+     into it rather than joining the shell's grid. */
+  /* Inside the frame, not over the window. Both cards are 320x350 and 632x478
+     of four-colour-era art; stretched to a 4K desktop they are mostly grain,
+     and at the size of the field they read the way they were drawn. */
+  .intro {
+    position: absolute; inset: var(--frame-edge); z-index: 50; background: #000;
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; cursor: pointer;
+  }
+  .intro[hidden] { display: none !important; }
+  /* `width`, not `max-width`: a canvas has an intrinsic size and will not grow
+     past it on its own, so the small original stayed small in a big window. */
+  /* A canvas has an intrinsic size and will not grow past it on its own, so the
+     fit is given explicitly. Both cards are 4:3 however they are stored -- the
+     Pseudos screen is 632x478 of a 640x480 mode, the Webfoot one is 320x350 of
+     the game's own non-square pixels -- so one rule covers them. */
+  .intro .fit { height: 100%; max-width: 100%; aspect-ratio: 4 / 3; }
+  .intro canvas {
+    width: 100%; height: 100%; display: block; image-rendering: pixelated;
+  }
+  .intro .hint { position: absolute; bottom: 10px; }
+
+  /* ---- the boss readout ------------------------------------------------
+     Not in the original. A boss is several objects with separate hit points,
+     some of which cannot be destroyed at all, and the sprites say none of it. */
+  .boss-body { gap: 3px; }
+  .boss-grp {
+    font-size: 8px; letter-spacing: .24em; color: var(--v-mid);
+    margin-top: 3px; padding-bottom: 1px;
+    border-bottom: 1px solid color-mix(in srgb, var(--v-mid) 30%, transparent);
+  }
+  /* A fixed row height, and the icon overflows it rather than setting it:
+     the parts are different sprites of different heights, and letting them
+     drive the layout made the spacing between bars jump from row to row. */
+  .boss-row { display: flex; align-items: center; gap: 6px; height: 13px; }
+  .boss-ico {
+    width: 18px; height: 100%; flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .boss-ico canvas { max-height: 100%; width: auto; }
+  .boss-row .track { flex: 1; height: 4px; }
+  .boss-n {
+    font: 500 9px/1 var(--mono); letter-spacing: .06em; color: var(--v-lit);
+    min-width: 3.2em; text-align: right;
+  }
+  /* Knocked out: the row stays, so you can see what is left rather than
+     watching the list shuffle under you. */
+  .boss-row[data-gone="1"] { opacity: .38; }
+  .boss-row[data-gone="1"] .boss-n { color: var(--g-mid); }
+  /* 65535 hit points is "this one does not die", not a very long bar. */
+  .boss-row[data-imm="1"] .track i { background: var(--g-mid); }
+  .boss-row[data-imm="1"] .boss-n { color: var(--g-mid); }
+
+  .gun-row { display: flex; align-items: center; gap: 9px; }
+  .gun-icon { display: flex; align-items: center; justify-content: center;
+              width: 28px; height: 26px; flex: 0 0 auto; }
+  .gun-name { font-size: 9px; line-height: 1.25; letter-spacing: .1em;
+              color: var(--v-max); }
+  .ico { display: block; image-rendering: pixelated; }
+
+  .lives { display: flex; align-items: center; gap: 4px; min-height: 15px;
+           overflow: hidden; }
+  .lives .ico { flex: 0 0 auto; }
+  .lives .more { font-size: 10px; color: var(--v-lit); }
+
+  .rank-n {
+    margin-left: auto; font-size: calc(var(--pix-unit) * 2); font-weight: 500;
+    line-height: 1; color: var(--v-max);
+  }
+  .ladder .cells { gap: 1px; }
+  .ladder .cells i { height: 7px; }
+  .ladder .cells i[data-on="1"] { background: var(--v-lit); }
+
+  .medals { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; }
+  .medals { gap: 2px; }
+  /* The same construction as a panel: an outer box holding the metal gradient,
+     an inner one holding the face. Flat rings read as lilac; a gradient reads
+     as metal. */
+  .medals i {
+    aspect-ratio: 1; padding: 2px; border: 1px solid #0c0b11;
+    background: linear-gradient(150deg, #d2ced9 0%, #8d8a99 24%, #4e4c58 52%,
+                                        #7c7987 76%, #cfcbd8 100%);
+  }
+  .medals b {
+    display: block; width: 100%; height: 100%;
+    border: 1px solid #0d0c12;
+    background:
+      repeating-linear-gradient(180deg, rgba(0,0,0,.30) 0 1px, transparent 1px 2px),
+      linear-gradient(160deg, #262433 0%, #16151f 60%, #101017 100%);
+  }
+  .medals i[data-on="1"] b {
+    background:
+      repeating-linear-gradient(180deg, rgba(0,0,0,.20) 0 1px, transparent 1px 2px),
+      linear-gradient(160deg, #efecf9 0%, var(--v-lit) 55%, #8d82c2 100%);
+  }
+
+  .readout { display: flex; flex-direction: column; gap: 3px; }
+  .readout .rv {
+    font-size: calc(var(--pix-unit) * 2); font-weight: 500; line-height: 1;
+    color: var(--v-max);
+  }
+  .readout.cr .rv { font-size: calc(var(--pix-unit) * 2); color: var(--v-lit); }
+  .money { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+  .shop-btn {
+    display: flex; align-items: center; gap: 11px;
+    background: none; border: 0; padding: 0; cursor: pointer; font: inherit;
+  }
+  .shop-label {
+    font-size: 9px; letter-spacing: .14em; color: var(--g-lit); white-space: nowrap;
+  }
+  .shop-btn:hover .shop-label { color: var(--g-max); }
+  /* The same two-box metal as the panels and the medal slots, so the button
+     reads as part of the same instrument. */
+  .shop-ico {
+    display: flex; align-items: center; justify-content: center;
+    width: 34px; height: 30px; padding: 2px; border: 1px solid #0c0b11;
+    background: linear-gradient(150deg, #d2ced9 0%, #8d8a99 24%, #4e4c58 52%,
+                                        #7c7987 76%, #cfcbd8 100%);
+    color: var(--v-lit);
+  }
+  .shop-ico > * {
+    width: 100%; height: 100%; display: block;
+    border: 1px solid #0d0c12; padding: 1px;
+    background:
+      repeating-linear-gradient(180deg, rgba(0,0,0,.30) 0 1px, transparent 1px 2px),
+      linear-gradient(160deg, #262433 0%, #16151f 60%, #101017 100%);
+  }
+  .shop-btn:hover .shop-ico { color: var(--v-max); }
+
+  /* ---- the screens that are not the game ------------------------------- */
+  /* An explicit `display` beats the `hidden` attribute, so it has to be said
+     out loud: without this both screens are up at once and the later one wins. */
+  .screen[hidden] { display: none; }
+  .screen {
+    position: absolute; inset: var(--frame-edge); z-index: 2; font-size: 0;
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: flex-end; gap: 4%; padding-bottom: 7%;
+    background: #000;
+  }
+  .title-art { position: absolute; image-rendering: pixelated; }
+  /* Nothing is flying, so the readouts step back. */
+  body:not([data-screen="playing"]) .col { opacity: .4; transition: opacity .25s; }
+  .items { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  /* Lilac rather than grey: the same weight as `--g-mid`, turned onto the
+     violet the rest of the interface is in. It is the colour the items that
+     led nowhere used to wear -- and now that all three lead somewhere, it is
+     the colour of a menu item. The selected one still goes to `--v-max`. */
+  .item {
+    font: 500 calc(var(--pix-unit) * 3)/1 var(--mono); letter-spacing: 5px;
+    color: #6A6580; background: none; border: 0; cursor: pointer;
+    padding: 9px 26px; position: relative;
+  }
+  .item[data-on="1"] { color: var(--v-max); }
+  /* The bracket that marks the choice, rather than a highlight bar. */
+  .item[data-on="1"]::before, .item[data-on="1"]::after {
+    content: ''; position: absolute; top: 50%; width: 9px; height: 9px;
+    margin-top: -5px; border: 1px solid var(--v-mid);
+  }
+  .item[data-on="1"]::before { left: 4px; border-right: 0; }
+  .item[data-on="1"]::after { right: 4px; border-left: 0; }
+  /* Nothing is `off` at the moment -- all three items lead somewhere -- but the
+     rule stays for the next one that does not, and it has to sit further back
+     now that the live colour has moved onto the same ramp. */
+  .item.off { color: #3D3A4A; cursor: default; }
+  .item.off[data-on="1"] { color: #514C63; }
+  .hint {
+    font-size: clamp(8px, .9vw, 10px); letter-spacing: .22em; color: #4b4759;
+  }
+
+  /* ---- the shop -------------------------------------------------------- */
+  .shop {
+    justify-content: flex-start; gap: 0; padding: 3% 0;
+    background: rgba(0, 0, 0, .93);
+  }
+  /* The list is a column, not a table stretched across the field: a name and
+     its price belong next to each other, not at opposite edges. */
+  .shop-head, .shop-list, .shop .hint {
+    width: min(58%, calc(var(--pix-unit) * 42));
+  }
+  .shop-head {
+    display: flex; align-items: baseline;
+    padding-bottom: 8px; margin-bottom: 6px;
+    border-bottom: 1px solid var(--g-mid);
+  }
+  .shop-title { font-size: calc(var(--pix-unit) * 2); color: var(--v-max);
+                letter-spacing: 5px; }
+  .shop-bal { margin-left: auto; font-size: calc(var(--pix-unit) * 2);
+              color: var(--v-lit); letter-spacing: 2px; }
+  .shop-list { display: flex; flex-direction: column; }
+  .shop-sect {
+    font-size: 8px; letter-spacing: .24em; color: var(--v-mid);
+    padding: 4px 8px 3px; border-bottom: 1px solid rgba(109,109,109,.28);
+    margin: 14px 0 3px;
+  }
+  .shop-sect:first-child { margin-top: 4px; }
+  .shop-row {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 2px 8px; background: none; border: 0; cursor: pointer;
+    font: 400 12px/1.4 var(--mono); letter-spacing: .06em; color: #EFEFF4;
+    text-align: left;
+  }
+  .shop-row[data-on="1"] {
+    color: #fff;
+    background: linear-gradient(90deg, rgba(72,56,141,.55), rgba(72,56,141,.1));
+    box-shadow: inset 2px 0 0 var(--v-mid);
+  }
+  .shop-row[data-off="1"] { color: #9d98b0; }
+  .shop-row[data-off="1"] .shop-row-price { color: var(--r-mid); }
+  .shop-row-ico { width: 28px; display: flex; justify-content: center; }
+  .shop-row-name { flex: 1; }
+  .shop-row-have { font-size: 8px; letter-spacing: .18em; color: var(--v-mid); }
+  .shop-row-price {
+    font-size: calc(var(--pix-unit) * 1.5); color: var(--v-lit);
+    letter-spacing: 1px; min-width: 4.5em; text-align: right;
+  }
+  .shop .hint { margin-top: 10px; }
+
+  /* ---- the pause menu -------------------------------------------------- */
+  .pause {
+    justify-content: center; gap: 26px; padding: 0;
+    background: rgba(0, 0, 0, .82);
+  }
+  .pause-title {
+    font-size: calc(var(--pix-unit) * 3); letter-spacing: 8px; color: var(--v-max);
+  }
+
+  .over { justify-content: center; gap: 18px; padding: 0; }
+  .over-title {
+    font: 600 calc(var(--pix-unit) * 4)/1 var(--mono); letter-spacing: 9px;
+    color: var(--r-lit); text-align: center;
+  }
+  .over-score {
+    display: grid; grid-template-columns: auto auto; gap: 5px 14px;
+    align-items: baseline;
+  }
+  .over-score .k { font-size: 9px; justify-self: end; }
+  /* Size and weight, not the `font` shorthand: the shorthand carries a family
+     with it, and at two classes it outranks `.pix` -- which is how this one
+     line stayed on the interface mono while everything around it changed. */
+  .over-score .n {
+    font-size: calc(var(--pix-unit) * 2); font-weight: 500; line-height: 1;
+    color: var(--v-max);
+  }
+
+  /* ---- the high score table -------------------------------------------- */
+  /* A narrow block, not a row stretched across the field. A name and its score
+     belong next to each other: pushed to opposite edges the eye has to travel,
+     and ten rows of travelling is not a table anyone reads.
+
+     No width here is an `em` or a `ch`, for two reasons both learned the hard
+     way. `.screen` sets `font-size: 0`, so a track written in either collapses
+     to nothing and takes the whole column with it. And the pixel face is
+     *proportional* -- eighteen M's measure 230px against eighteen i's at 58 --
+     so `ch` could not size a name column in it even with a font size to resolve
+     against. The name is set in the interface mono, which really is fixed-pitch
+     at 9.6px a character here, so the 200 below holds a full eighteen with room
+     to spare. */
+  .scores {
+    justify-content: center; gap: 0; padding: 4% 0;
+    /* One place that knows the measure. The heading, the names and the dates
+       all begin at `--name-x`; the place numbers hang outside it. */
+    --rank-w: calc(var(--pix-unit) * 2.4);
+    --name-w: 200px;
+    --score-w: calc(var(--pix-unit) * 9);
+    --col-gap: 12px;
+    --row-pad: 10px;
+    --name-x: calc(var(--row-pad) + var(--rank-w) + var(--col-gap));
+    --table-w: calc(var(--name-x) + var(--name-w) + var(--col-gap)
+                    + var(--score-w) + var(--row-pad));
+  }
+  .scores-head, .scores-list, .scores .hint { width: var(--table-w); max-width: 94%; }
+  /* Left, not centred. Centring the heading over the block centred it over the
+     dates as well -- and they are wide, dim, and not what anyone is reading, so
+     the result looked a column off to the eye following the names. */
+  /* No rule under the heading. The rows already have their own hairlines, and a
+     heavier one above them read as a second, competing edge. */
+  .scores-head {
+    display: flex; justify-content: flex-start; padding-left: var(--name-x);
+    padding-bottom: 12px;
+  }
+  .scores .hint { margin-top: 14px; padding-left: var(--name-x); }
+  .scores-list { display: flex; flex-direction: column; }
+  /* One rhythm for every row: the same three columns, the same padding, and a
+     hairline between. The date sits under the name in the same two columns it
+     spans, so nothing about a row changes its height. */
+  .score-row {
+    display: grid;
+    grid-template-columns: var(--rank-w) var(--name-w) var(--score-w);
+    column-gap: var(--col-gap); align-items: baseline;
+    padding: 6px var(--row-pad) 5px;
+    border-bottom: 1px solid rgba(109, 109, 109, .16);
+  }
+  .score-row:last-child { border-bottom: 0; }
+  /* `line-height` out loud on every line here: `.frame` sets it to 0 so a
+     canvas has no stray descender space under it, and that 0 is a length, so it
+     inherits into the screens and gives any text without its own value a box of
+     no height at all. */
+  .score-rank {
+    font-size: 9px; line-height: 1; letter-spacing: .12em;
+    color: var(--v-mid); text-align: right;
+  }
+  /* Size and weight rather than the `font` shorthand, which would carry a family
+     with it and outrank `.pix` -- the same trap the end screen's score fell into. */
+  .score-name, .score-n {
+    font-size: calc(var(--pix-unit) * 1.6); font-weight: 500; line-height: 1.1;
+    color: var(--v-max);
+  }
+  /* The name is arbitrary text a player typed, so it goes in the fixed-pitch
+     interface face rather than the pixel one -- the same split the shop makes
+     between an item's name and its price. */
+  .score-name {
+    font-family: var(--mono); letter-spacing: .03em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .score-n { text-align: right; letter-spacing: 1px; }
+  .score-date {
+    grid-column: 2 / 4; margin-top: 4px;
+    font-size: 8px; line-height: 1; letter-spacing: .2em; color: #6b6680;
+  }
+  /* The row just set, marked the way the shop marks the row under the cursor. */
+  .score-row[data-new="1"] {
+    background: linear-gradient(90deg, rgba(72, 56, 141, .55), rgba(72, 56, 141, .06));
+    box-shadow: inset 2px 0 0 var(--v-mid);
+  }
+  .score-row[data-new="1"] .score-name,
+  .score-row[data-new="1"] .score-n { color: #fff; }
+  .score-row[data-new="1"] .score-date { color: var(--v-lit); }
+
+  /* ---- the credits ------------------------------------------------------ */
+  /* The same left edge and the same measure as the score table, because they
+     are two pages of one book. Two columns: a dim label and a bright value.
+     That is the opposite of a caption, and the right way round here -- what
+     matters is " Pseudos Software ", not the words " Written by ". */
+  .credits { justify-content: center; gap: 0; padding: 4% 0; --name-x: 10px; }
+  .credits .scores-head, .credits-body, .credits .hint {
+    width: calc(var(--pix-unit) * 42); max-width: 94%;
+  }
+  .credits .scores-head { padding-left: var(--name-x); }
+  .credits .hint { margin-top: 18px; padding-left: var(--name-x); }
+  .credits-body { display: flex; flex-direction: column; }
+  .credits-sect {
+    font-size: 8px; line-height: 1; letter-spacing: .24em; color: var(--v-mid);
+    padding: 4px var(--name-x) 5px;
+    border-bottom: 1px solid rgba(109, 109, 109, .28);
+    margin: 16px 0 6px;
+  }
+  .credits-sect:first-child { margin-top: 2px; }
+  .credits-row {
+    display: grid; grid-template-columns: calc(var(--pix-unit) * 11) 1fr;
+    column-gap: 14px; align-items: baseline;
+    padding: 4px var(--name-x) 3px;
+  }
+  .credits-k {
+    font-size: 9px; line-height: 1.3; letter-spacing: .1em;
+    color: #6b6680; text-align: right;
+  }
+  .credits-v {
+    font: 400 calc(var(--pix-unit) * 1.2)/1.35 var(--mono);
+    letter-spacing: .02em; color: var(--v-max);
+  }
+  /* A note, not an entry: it runs the full measure and is indented to the same
+     left edge as the values above it, so the column still reads as a column. */
+  .credits-note {
+    margin: 12px 0 0;
+    padding: 0 var(--name-x) 0 calc(var(--pix-unit) * 11 + 14px + var(--name-x));
+    font: 400 calc(var(--pix-unit) * 1.2)/1.5 var(--mono);
+    letter-spacing: .02em; color: var(--v-lit); text-wrap: pretty;
+  }
+
+  /* ---- asking for a name ----------------------------------------------- */
+  .names { justify-content: center; gap: 22px; padding: 0; }
+  /* Not the end screen's red: this is the one good thing that can happen at the
+     end of a run, and it should not be lit the same colour as losing. */
+  .names .over-title { color: var(--v-max); }
+  .name-place {
+    font-size: calc(var(--pix-unit) * 1.6); line-height: 1;
+    letter-spacing: 3px; color: var(--v-lit);
+  }
+  .name-form { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+  /* Wide enough for the longest name it will accept, in the face the table
+     draws it in, so what is typed is what will be seen. */
+  .name-input {
+    width: calc(var(--pix-unit) * 21); padding: 8px 10px; text-align: center;
+    font: 500 calc(var(--pix-unit) * 1.6)/1.2 var(--mono); letter-spacing: .03em;
+    color: var(--v-max); background: rgba(72, 56, 141, .16);
+    border: 1px solid var(--v-mid); border-radius: 0; outline: 0;
+  }
+  .name-input:focus { border-color: var(--v-max); background: rgba(72, 56, 141, .3); }
+  /* The placeholder is the name that will actually be used if the field is left
+     alone, so it is dim but not invisible. */
+  .name-input::placeholder { color: #7d7895; opacity: 1; }
+
+  /* ---- under the field ------------------------------------------------ */
+  .progress { display: flex; align-items: center; gap: 9px; width: 100%; }
+  .progress .track { flex: 1; height: 2px; }
+  .progress .track i { background: var(--g-max); }
+  .progress .v { margin-left: 0; color: var(--g-max); }
+
+  footer {
+    color: #4d4d4d; font-size: 10px; display: flex; gap: 7px 14px;
+    flex-wrap: wrap; align-items: baseline; padding-top: 4px;
+    min-height: 0; overflow: hidden;
+  }
+  /* A window too short to hold the frame at all is the one case where being
+     able to scroll is better than clipping. */
+  @media (max-height: 460px) {
+    html, body { height: auto; min-height: 100dvh; overflow: auto; }
+  }
+  footer #stats { margin-left: 0; width: 100%; }
+  #pseudos, #webfoot { color: #4d4d4d; text-decoration: none;
+             border-bottom: 1px dotted #ffffff26; cursor: pointer; }
+  #pseudos:hover, #webfoot:hover { color: var(--v-mid);
+             border-bottom-color: currentColor; }
+  /* The big lettering is set in the pixel face rather than having scanlines
+     drawn over it. Stripes painted across vector glyphs land wherever the
+     rasteriser puts them -- at one zoom a line falls straight on the middle bar
+     of an E -- and they shift as the window resizes. A face with the texture
+     built into the glyphs does not move.
+
+     Sizes are whole multiples of --pix-unit and tracking is in whole pixels:
+     an em fraction lands glyphs on half-pixel advances and fringes the bitmap
+     exactly the way the stripes did. */
+  .pix {
+    font-family: 'Pixel Display', var(--mono);
+    -webkit-font-smoothing: none; -moz-osx-font-smoothing: unset;
+    font-smooth: never;
+  }
+</style>
+
+<header>
+  <div id="logo">LOGO</div>
+  <div class="titles">
+    <h1 class="pix">B*A*D</h1>
+    <div class="sub">Theatre of Destruction &middot; Pseudos Software 1997</div>
+  </div>
+  <button id="hires" type="button" title="Upscaled sprites (H)" aria-pressed="false">
+    <span class="spk"></span><kbd>H</kbd>
+  </button>
+  <button id="sound" type="button" title="Sound (M)" aria-pressed="true">
+    <span class="spk"></span><kbd>M</kbd>
+  </button>
+</header>
+
+<div id="stage">
+  <div class="field-wrap"><div class="frame"><canvas id="field"></canvas></div></div>
+</div>
+
+<footer>
+  <div id="stats" hidden>loading…</div>
+  <span>Remastered 2026 by Discourage &middot; from the 1997 DOS original by</span>
+  <a id="pseudos" title="Watch the Pseudos intro">Pseudos Software</a>
+  <span>and</span>
+  <a id="webfoot" title="Watch the Webfoot card">Webfoot Technologies</a>
+</footer>
+
+<script type="module" src="src/main.js"></script>

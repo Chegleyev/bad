@@ -1,0 +1,19 @@
+{
+  "name": "bad-remaster",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Web remaster of B.A.D. (Pseudos Software / Webfoot, 1997)",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node test/sim.test.mjs",
+    "shot": "node scripts/shot.mjs",
+    "bench": "node scripts/bench.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.10.0",
+    "vite": "^7.1.5"
+  }
+}
