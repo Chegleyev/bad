@@ -341,17 +341,30 @@ for (const [id, which] of [['pseudos', 'pseudos'], ['webfoot', 'webfoot']])
 // A card sits inside the field's frame, so a click beside it never reaches it.
 // While one is up, the whole page dismisses it.
 addEventListener('click', () => { if (intro.showing) intro.advance(); });
-// The badge says "press any key", and a click is one: an attract loop that
-// ignored the mouse would be a page that looks broken to anyone who reaches for
-// it rather than for the keyboard.
-addEventListener('pointerdown', () => {
-  if (!demo || screen !== 'playing') return;
+/**
+ * Stop watching, from wherever the demo has got to.
+ *
+ * Not only from `playing`, which is what both doors used to ask for. Starting
+ * the attract loop awaits three fetches and a scan for a wave to land on, and
+ * the screen is still the menu for all of it -- so a key pressed in that second
+ * went to the menu, which started a real game, while `demo` was still true and
+ * the badge came up over someone's own run. Anything that puts the player back
+ * in charge goes through here, and `startGame` checks on the way out whether
+ * the hand it was dealing is still wanted.
+ */
+function stopDemo() {
+  if (!demo) return false;
   demo = false;
   demoPlan = null;
   if (demoBadge) demoBadge.hidden = true;
-  toMenu();
+  if (screen === 'playing') toMenu();
   idleSince = performance.now();
-});
+  return true;
+}
+// The badge says "press any key", and a click is one: an attract loop that
+// ignored the mouse would be a page that looks broken to anyone who reaches for
+// it rather than for the keyboard.
+addEventListener('pointerdown', () => { stopDemo(); });
 // What the script last handed to the driver, so the intro can hand it back.
 let lastBank = 0;
 
@@ -642,6 +655,10 @@ async function startGame() {
   globalThis.sim = sim;
   globalThis.dbg.sim = sim;
   held.clear();
+  // The hand was dealt for a demo and the demo was called off while it loaded:
+  // that is a keypress on the menu, and it means the menu, not a run nobody
+  // asked for.
+  if (plan && !demo) { toMenu(); return; }
   screen = 'playing';
   if (menu) menu.show(false);
   over.show(false);
@@ -888,16 +905,8 @@ addEventListener('keydown', e => {
   // change your mind about.
   if (e.code === 'KeyH' && !e.repeat) { setHi(!hiOn); e.preventDefault(); return; }
   // Any key ends the demo. It is a thing to watch, not a thing to play -- and
-  // this is the door the attract mode will need.
-  if (demo && screen === 'playing') {
-    demo = false;
-    demoPlan = null;
-    if (demoBadge) demoBadge.hidden = true;
-    toMenu();
-    idleSince = performance.now();
-    e.preventDefault();
-    return;
-  }
+  // this is the door the attract mode needs.
+  if (demo) { stopDemo(); e.preventDefault(); return; }
   if (screen === 'playing' && e.code === 'KeyB') { openShop(); e.preventDefault(); return; }
   if (screen === 'playing' && e.code === 'Escape') { openPause(); e.preventDefault(); return; }
   if (screen === 'menu') {
