@@ -119,6 +119,10 @@ export class Player {
     this.credits = 0;
     this.maxSpeed = cfg.maxSpeed;      // raised by SIDE SPEED UP, floored at 1.0
     this.fireEvery = cfg.fireEvery;    // lowered by RAPID FIRE, floored at 4
+    // What has gone into the gun in hand, valued at the shop's own prices --
+    // the gun itself, every boost of it, every round of ammunition. Spent on a
+    // swap: see `Sim.tradeIn`.
+    this.invested = 0;
     this.equip(cfg.startWeapon);
   }
 
@@ -370,7 +374,10 @@ export class Player {
     this.decay = 0;
     this.invuln = c.invulnTicks || 0;
     const prev = this.gun.prev;
-    if (prev) { this.weapon = null; this.equip(prev, sim); }
+    // Whatever was built into the gun goes with it: a rung lost to a death pays
+    // nothing back. `Sim.tradeIn` is for giving a gun up, not for having it
+    // taken.
+    if (prev) { this.invested = 0; this.weapon = null; this.equip(prev, sim); }
     else this.ammo = Math.min(this.gun.mag, this.gun.cost * 2);
     this.fireEvery = c.fireEvery;
     if (this.maxSpeed - c.sideStep >= c.sideMin) this.maxSpeed -= c.sideStep;
@@ -858,6 +865,71 @@ export class Sim {
   }
 
   /**
+   * What the shop charges for an item -- the valuation the trade-in counts in.
+   *
+   * The cannon is in no catalogue, so a cannon boost would otherwise be worth
+   * nothing and a fully built cannon would trade in for whatever its ammunition
+   * came to. It is valued at the same rung the cap uses.
+   */
+  priceOf(item) {
+    const P = this.data.player;
+    const row = P.shop.find((r) => r.item === item);
+    if (row) return row.price;
+    return P.effects[item] === 'weapon' ? this.tradeCap(P.weaponOf[item]) : 0;
+  }
+
+  /**
+   * A quarter of what went into the gun, handed back when it is given up.
+   *
+   * The second place the port is deliberately kinder than the original, and for
+   * the same reason as the first: the game should not punish a run for going
+   * well. A gun at its damage cap with a full magazine is four boosts and a
+   * dozen rounds on top of the gun itself, and the only way to take the better
+   * weapon lying on the floor is to throw all of it away. So the choice a
+   * player actually faces is between a gun they have built and a gun that is
+   * better, and the honest answer is usually "keep the one you have" -- which
+   * makes the whole top of the ladder a trap, and every weapon drop after the
+   * first something to steer around.
+   *
+   * A quarter back, capped at what the shop would charge for the gun being
+   * given up, so an annihilator built all the way to its cap returns 900 and
+   * can be bought back. The cannon is not stocked at all; it is capped at the
+   * phaser's price, which is the next rung and the nearest thing to a value.
+   *
+   * Not paid when the gun is taken *from* you -- the rung a death costs you
+   * (`sub_327a`) and the confiscator are punishments, and a punishment that
+   * pays is not one. Nothing is refunded on what was never invested, so a gun
+   * picked up and dropped again in the same breath is worth a quarter of
+   * itself and no more.
+   */
+  tradeIn() {
+    const P = this.data.player, p = this.player;
+    const back = Math.min(Math.round(p.invested / 4), this.tradeCap(p.weapon));
+    p.invested = 0;
+    const paid = Math.max(0, Math.min(back, P.creditCap - p.credits));
+    if (paid <= 0) return;
+    p.credits += paid;
+    // No number in the banner: the original's font carries only the glyphs its
+    // own strings needed, and 3, 4, 6, 7, 8 and 9 are not among them -- it can
+    // spell " 50 CREDITS " and nothing else. The purse says how much.
+    this.announce(' CREDITS BACK ', this.data.text.playerColour);
+  }
+
+  /** The most a gun can be traded in for: what the shop sells it at. */
+  tradeCap(id) {
+    const P = this.data.player;
+    for (const row of P.shop) if (P.weaponOf[row.item] === id) return row.price;
+    // The cannon is in no catalogue: it is what you start with and what the
+    // confiscator leaves you. The phaser is the next rung up and 300 on the
+    // panel, which is what the exception is worth.
+    let cheapest = 0;
+    for (const row of P.shop)
+      if (P.effects[row.item] === 'weapon' && (!cheapest || row.price < cheapest))
+        cheapest = row.price;
+    return cheapest;
+  }
+
+  /**
    * The item index of " 50 CREDITS ", found rather than written down.
    *
    * The compensation below is the game's own pickup, not a number invented for
@@ -903,14 +975,17 @@ export class Sim {
     switch (P.effects[item]) {
       case 'ammo':                                   // `sub_1e19`
         // Capacity is checked against rounds held *plus* rounds in flight.
-        if (p.gun.mag > p.ammo + this.inFlight) p.ammo++;
+        if (p.gun.mag > p.ammo + this.inFlight) { p.ammo++; p.invested += this.priceOf(item); }
         break;
       case 'weapon':                                 // `sub_2121`
+        if (p.weapon !== P.weaponOf[item]) this.tradeIn();
         p.equip(P.weaponOf[item], this);
+        p.invested += this.priceOf(item);
         break;
       case 'weaponReset':                            // `sub_20d4`
         p.maxSpeed = P.maxSpeed;
         p.fireEvery = P.fireEvery;
+        p.invested = 0;                              // confiscated, not sold
         p.weapon = null;
         p.equip(P.weaponOf[item], this);
         break;
