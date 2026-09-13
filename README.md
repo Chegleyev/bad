@@ -56,6 +56,7 @@ Four rules are deliberately not the original's:
 * **" SIDE SPEED UP " stops at four times the starting speed.** `sub_1e8b` has
   no ceiling at all, and a long enough run ends with a ship that crosses the
   field faster than it can be aimed.
+
 * **A pickup with nothing left to give is worth 50 credits.** A full magazine, a
   gun already at its damage cap, a reload at its floor, full hull, top speed —
   the original drops all of those on the floor. Being punished for doing well is
@@ -66,13 +67,13 @@ Four rules are deliberately not the original's:
 * **Giving up a gun pays a quarter of it back.** A gun at its damage cap with a
   full magazine is four boosts and a dozen rounds on top of the gun itself, and
   the original's only way to take the better weapon lying on the floor is to
-  throw all of that away -- so the honest answer is usually "keep the one you
+  throw all of that away — so the honest answer is usually "keep the one you
   have", which makes the top of the ladder a trap and every later weapon drop
   something to steer around. A quarter of what went in comes back, valued at the
   shop's own prices and capped at what the shop charges for the gun being given
   up: an annihilator built all the way to its cap returns 900, which buys
   another one. The cannon is in no catalogue and is capped at the phaser's 300.
-  Nothing is paid when the gun is taken *from* you -- the rung a death costs
+  Nothing is paid when the gun is taken *from* you — the rung a death costs
   (`sub_327a`) and the confiscator are punishments, and a punishment that pays
   is not one.
 
