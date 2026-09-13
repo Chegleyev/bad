@@ -1,7 +1,79 @@
 <!doctype html>
+<html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>B.A.D.</title>
+<!-- The title carries the full name because "B.A.D." alone is three letters
+     that mean nothing to a search engine and a great deal to a dictionary. -->
+<title>B.A.D. (1997) — play Blasting, Annihilation &amp; Destruction in a browser</title>
+<meta name="description" content="A web remaster of B.A.D. — Blasting, Annihilation &amp; Destruction, the 1997 MS-DOS shoot-'em-up by Pseudos Software and Webfoot Technologies. The original simulation, transcribed from the disassembly, running in a browser. Free, open source, nothing to install.">
+<link rel="canonical" href="https://chegleyev.github.io/bad/">
+<!-- The card a link turns into on Reddit, Hacker News, Discord, Telegram. For
+     a project like this that is the channel that matters -- far more than any
+     meta tag, since nobody is going to out-rank the phrase "retro gaming". -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="B.A.D.">
+<meta property="og:url" content="https://chegleyev.github.io/bad/">
+<meta property="og:title" content="B.A.D. — Blasting, Annihilation &amp; Destruction (1997)">
+<meta property="og:description" content="The 1997 MS-DOS shoot-'em-up by Pseudos Software, rebuilt to run in a browser. The original simulation at its own 70.0863 Hz, its art and music decoded from the shipped archives.">
+<meta property="og:image" content="https://chegleyev.github.io/bad/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The B.A.D. title beside a screenshot of the level 2 boss fight">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#0a090e">
+<!--
+  Cloudflare Web Analytics. Cookieless and without fingerprinting, so it needs
+  no consent banner -- which is the whole reason it is this and not Google
+  Analytics, the other being that an audience of retro-gamers and programmers
+  blocks GA at a rate that would make the numbers fiction.
+
+  The token is from the Cloudflare dashboard, Web Analytics -> Add a site. It
+  is a *public* value and belongs in the repository: every site using the beacon
+  carries it in plain sight in its page source.
+
+  Wrapped rather than pasted as the dashboard gives it, for one reason: it must
+  not run on a development machine, where the only visitor is whoever is
+  building it. An empty token also loads nothing at all, so a fork that has not
+  set one costs no request.
+-->
+<script>
+  (() => {
+    const CF_BEACON = '31425c05de884f33b216d17b42b73783';
+    const host = location.hostname;
+    const local = host === '' || host === 'localhost' || host === '[::1]' ||
+                  host === '::1' || host.endsWith('.local') ||
+                  /^127\./.test(host) || /^192\.168\./.test(host) ||
+                  /^10\./.test(host);
+    if (!CF_BEACON || local) return;
+    const s = document.createElement('script');
+    s.type = 'module';
+    s.src = 'https://static.cloudflareinsights.com/beacon.min.js';
+    s.setAttribute('data-cf-beacon', JSON.stringify({ token: CF_BEACON }));
+    document.head.append(s);
+  })();
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "VideoGame",
+  "name": "B.A.D. — Blasting, Annihilation & Destruction",
+  "alternateName": ["B.A.D.", "BAD", "Blasting, Annihilation and Destruction"],
+  "url": "https://chegleyev.github.io/bad/",
+  "image": "https://chegleyev.github.io/bad/og.png",
+  "description": "A browser remaster of the 1997 MS-DOS vertical shoot-'em-up B.A.D., transcribed from the original's disassembly.",
+  "datePublished": "1997",
+  "genre": ["Shoot 'em up", "Arcade", "Retro"],
+  "gamePlatform": ["Web browser", "MS-DOS"],
+  "operatingSystem": "Any",
+  "applicationCategory": "Game",
+  "author": [
+    { "@type": "Organization", "name": "Pseudos Software" },
+    { "@type": "Organization", "name": "Webfoot Technologies, Inc." }
+  ],
+  "isBasedOn": "B.A.D. (Pseudos Software / Webfoot Technologies, 1997)",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+}
+</script>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22><text y=%2213%22 font-size=%2213%22>%F0%9F%91%81%EF%B8%8F</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -127,6 +199,13 @@
   #sound[aria-pressed="false"], #hires[aria-pressed="false"] { color: #55525f; }
   #sound[aria-pressed="false"] kbd, #hires[aria-pressed="false"] kbd {
     color: #55525f; border-color: #3a3843;
+  }
+  /* Readable by a crawler and by a screen reader, invisible to everyone else.
+     Not `display: none` and not `visibility: hidden`: both are ignored by
+     assistive technology, and search engines discount them. */
+  .sr {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip-path: inset(50%); white-space: nowrap;
   }
   h1 {
     margin: 0; font-size: calc(var(--pix-unit) * 3); font-weight: 600;
@@ -854,6 +933,29 @@
 
 <div id="stage">
   <div class="field-wrap"><div class="frame"><canvas id="field"></canvas></div></div>
+</div>
+
+<!-- Something for a crawler to read. A game is a canvas and a canvas is opaque,
+     so without this the page has a title, a footer, and nothing else that says
+     what it is. Off-screen rather than `display: none`, which search engines
+     discount, and it is the truth rather than a pile of keywords. -->
+<div class="sr">
+  <h2>About this remaster</h2>
+  <p>
+    <strong>B.A.D. — Blasting, Annihilation &amp; Destruction</strong> is a
+    vertically scrolling shoot-'em-up released for MS-DOS in 1997 by Pseudos
+    Software and published by Webfoot Technologies, Inc. You fly a single ship
+    against eight levels of insects, machines and bosses, collecting weapons,
+    dignity markers and credits along the way.
+  </p>
+  <p>
+    This is a browser remaster. No source code for the original survives, so the
+    simulation was transcribed from its disassembly: fixed-point motion, the
+    game's own collision silhouettes, and its 70.0863 Hz tick. The art, music and
+    level scripts are the original's, decoded from the archives it shipped with.
+    It runs on WebGL 2 and an AudioWorklet, needs no plugin, no emulator and no
+    install, and is free and open source.
+  </p>
 </div>
 
 <footer>
