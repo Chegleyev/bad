@@ -32,7 +32,14 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      # `enablement` turns Pages on through the API if it is not on already.
+      # Without it the first run of this workflow on a fresh repository fails
+      # with "Get Pages site failed ... Not Found": the action only *reads* the
+      # Pages configuration, and there is nothing to read until somebody has
+      # been into Settings. This makes a clone or a fork deploy on its own.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
