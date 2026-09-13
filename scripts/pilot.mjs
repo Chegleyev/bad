@@ -63,6 +63,17 @@ const reload = arg('reload', null);
 // is what speed buys. Measured, it is worth more to a cannon than doubling its
 // damage. `--speed 1` is the cold ship, for the comparison.
 const speed = arg('speed', 3);
+// `--boss` skips the level and fights only its boss, which is the question
+// people actually argue about. The fast-forward is the game's own `?tick=boss`:
+// run the script with the gates open until a type 33 core is on the field, then
+// clear off the dozen waves that were skipped past on the way -- they are still
+// flying, and a boss fight is not a boss fight with a wave in it.
+const bossOnly = process.argv.includes('--boss');
+// Lives are an instrument setting, not a rule: a level is measured with more of
+// them than anyone has, so that every weapon gets the same exposure and dying
+// becomes a rate. A boss is the other question -- can you beat it on what the
+// game gives you -- so `--boss` starts from the game's own three.
+const livesArg = arg('lives', null);
 
 const load = (n) =>
   JSON.parse(readFileSync(new URL(`../public/data/level${n}.json`, import.meta.url)));
@@ -114,7 +125,37 @@ function run({ level, weapon, tier, seed }) {
   p.ammo = W.mag;
   const barrels = W.barrels.length;
 
-  const cap = (data.level.events.at(-1)[0] + 1200) * 2;
+  if (bossOnly) {
+    sim.skipGates = true;
+    while (sim.tick < 40000 && !sim.entities.some(e => e.tpl.type === 33)) sim.step();
+    for (const e of sim.entities) if (e.tpl.type !== 10 && e.tpl.type < 33) e.dead = true;
+    sim.enemyShots.length = 0;
+    sim.drops.length = 0;
+    sim.skipGates = false;
+    // The ship was flown through all of that with nobody steering, so it
+    // arrives dead or nearly so. Put it back the way it would arrive if it had
+    // been played there.
+    p.hp = p.maxHp; p.decay = 0; p.invuln = 0;
+    p.state = 'fly';
+    p.frame = data.player.tiltMid;
+    p.x = Math.round(data.player.x * FP); p.y = Math.round(data.player.y * FP);
+    p.px = p.x; p.py = p.y; p.vx = 0;
+    // And the gun, which the fast-forward eats: the ship dies a dozen times on
+    // the way with nobody steering, and every death drops it a rung
+    // (`sub_327a`), takes half a unit of speed and puts the reload back to the
+    // template's. Without putting all four back, `--tiers 1` and `--tiers 2`
+    // measured the same fight -- whatever gun happened to survive the trip.
+    p.weapon = null;
+    p.equip(weapon, sim);
+    p.damage = Math.round(W.damage * tier);
+    p.ammo = W.mag;
+    p.maxSpeed = Number(speed) || data.player.maxSpeed;
+    p.fireEvery = Number(reload) || data.player.fireEvery;
+    sim.won = false;
+  }
+  const bossAt = sim.tick;
+
+  const cap = bossOnly ? sim.tick + 12000 : (data.level.events.at(-1)[0] + 1200) * 2;
   let deaths = 0, volleys = 0, starved = 0, ticks = 0;
   let pc = sim.pc, stalled = false;
   // What the gate the script is parked on is waiting for, counted the way the
@@ -128,7 +169,7 @@ function run({ level, weapon, tier, seed }) {
       (e.tpl.type === 31 || e.tpl.type === 30) && e.tpl.group === op[1] ? 1 : 0), 0);
   };
   let fewest = Infinity, fewestAt = 0;
-  p.lives = 9999;
+  p.lives = livesArg ? Number(livesArg) : bossOnly ? data.player.lives : 9999;
   let lives = p.lives;
   let prevCool = p.cool ?? 0;
   while (ticks < cap) {
@@ -156,10 +197,13 @@ function run({ level, weapon, tier, seed }) {
       if (speed) p.maxSpeed = Number(speed);
       p.ammo = W.mag;
     }
-    if (sim.pc !== pc) { pc = sim.pc; fewest = Infinity; fewestAt = ticks; }
-    const left = waveLeft();
-    if (left < 0 || left < fewest) { fewest = left < 0 ? Infinity : left; fewestAt = ticks; }
-    else if (ticks - fewestAt > 8000) { stalled = true; break; }
+    // One gate and one boss: the tick cap is the only limit that makes sense.
+    if (!bossOnly) {
+      if (sim.pc !== pc) { pc = sim.pc; fewest = Infinity; fewestAt = ticks; }
+      const left = waveLeft();
+      if (left < 0 || left < fewest) { fewest = left < 0 ? Infinity : left; fewestAt = ticks; }
+      else if (ticks - fewestAt > 8000) { stalled = true; break; }
+    }
     if (sim.won) break;
   }
   const mins = ticks / data.tickHz / 60;
@@ -173,6 +217,7 @@ function run({ level, weapon, tier, seed }) {
     killsPerMin: sim.kills / mins,
     progPerMin: 100 * sim.pc / sim.prog.length / mins,
     secs: ticks / data.tickHz,
+    bossSecs: (sim.tick - bossAt) / data.tickHz,
   };
 }
 
@@ -184,14 +229,24 @@ const ORDER = Object.keys(NAMES).map(Number).filter(id => !only || NAMES[id] ===
 const pad = (s, n) => String(s).padStart(n);
 for (const tier of tiers) {
   console.log(`\n${'='.repeat(78)}\ndamage x${tier}${tier === 2 ? '  (the upgrade ceiling)' : '  (as picked up)'}${reload ? `, reload every ${reload}` : ''}, speed ${speed}\n`);
-  console.log('  level  weapon           won  stalled  through  deaths/min  kills/min  %/min  starved  caught');
+  console.log(bossOnly
+    ? '  level  weapon           beat  seconds   deaths  starved'
+    : '  level  weapon           won  stalled  through  deaths/min  kills/min  %/min  starved  caught');
   for (const level of levels) {
     for (const id of ORDER) {
       const rs = [];
       for (let s = 0; s < seeds; s++) rs.push(run({ level, weapon: id, tier, seed: 12345 + s * 7919 }));
       const avg = (f) => rs.reduce((a, r) => a + f(r), 0) / rs.length;
       const wins = rs.filter(r => r.won).length;
-      console.log(
+      if (bossOnly) {
+        const beat = rs.filter(r => r.won);
+        console.log(
+          `  ${pad(level, 5)}  ${NAMES[id].padEnd(14)}` +
+          `${pad(`${beat.length}/${rs.length}`, 5)}` +
+          `${pad(beat.length ? (beat.reduce((a, r) => a + r.bossSecs, 0) / beat.length).toFixed(0) : '-', 9)}` +
+          `${pad((avg(r => r.deaths)).toFixed(1), 9)}` +
+          `${pad((avg(r => r.starved) * 100).toFixed(0) + '%', 9)}`);
+      } else console.log(
         `  ${pad(level, 5)}  ${NAMES[id].padEnd(14)}` +
         `${pad(`${wins}/${rs.length}`, 5)}` +
         `${pad(`${rs.filter(r => r.stalled).length}/${rs.length}`, 9)}` +
