@@ -291,7 +291,8 @@ let screen = 'menu';
 let overAt = 0;
 const frame3 = canvas.closest('.frame');
 const menu = menuArt && new Menu(frame3, menuArt, menuBytes, startGame, base,
-                                 () => showScores(-1), () => showCredits());
+                                 () => showScores(-1), () => showCredits(),
+                                 () => startDemo());
 if (menu) menu.setBig(hiOn);        // `?hi=` starts the title the same way
 // Where a run goes when it earned a place: a name, then the table, then home.
 const names = new NameEntry(frame3, (name) => {
@@ -1078,6 +1079,14 @@ function dealDemo() {
   return demoPlan;
 }
 
+/** Hand the ship to the bot: the menu's fourth item, and the attract timer. */
+function startDemo() {
+  if (demo || demoBusy) return;
+  demo = true;
+  demoBusy = true;
+  startGame().finally(() => { demoBusy = false; });
+}
+
 let demoBusy = false;
 async function demoNext() {
   if (demoBusy || advancing) return;
@@ -1092,12 +1101,8 @@ let fps = 0, fpsT = performance.now(), fpsN = 0, hudTick = -1, statsT = 0, hudT 
 
 function frame() {
   // Nothing has happened on the menu for long enough: hand the ship to the bot.
-  if (attract && !demo && !demoBusy && screen === 'menu' && !intro.showing &&
-      performance.now() - idleSince > ATTRACT_AFTER) {
-    demo = true;
-    demoBusy = true;
-    startGame().finally(() => { demoBusy = false; });
-  }
+  if (attract && screen === 'menu' && !intro.showing &&
+      performance.now() - idleSince > ATTRACT_AFTER) startDemo();
   if (screen === 'playing') {
     clock.advance(() => sim.step(input()));
     // The last life ends the run. `sub_3538` puts up the original's own screen;

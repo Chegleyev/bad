@@ -148,12 +148,15 @@ function art(menu, bytes, base = '') {
  */
 export class Menu {
   constructor(host, menu, bytes, onStart, base = '', onScores = null,
-              onCredits = null) {
+              onCredits = null, onDemo = null) {
     this.onStart = onStart;
     this.items = [
       { label: 'NEW GAME', run: onStart },
       { label: 'HIGH SCORES', run: onScores || undefined },
       { label: 'CREDITS', run: onCredits || undefined },
+      // The same thing the menu does to itself after three quarters of a minute
+      // of nobody touching it, for anyone who would rather not wait.
+      { label: 'DEMO', run: onDemo || undefined },
     ];
     this.at = 0;
 
