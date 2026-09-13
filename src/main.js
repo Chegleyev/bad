@@ -399,6 +399,17 @@ function wireSound(s) {
 }
 
 /**
+ * True from the moment a level transition starts until the next level is up.
+ *
+ * `advance` awaits three fetches, which is milliseconds on a development
+ * machine and *seconds* on a real connection. Every key and click in that
+ * window reached `leaveEnd` again, where `pendingLevel` had already been
+ * cleared -- so a finished level was read as a finished run and the high score
+ * prompt came up over a level that was still loading.
+ */
+let advancing = false;
+
+/**
  * What the end screen leads to: the next level, the name prompt, or the menu.
  *
  * The prompt only comes up when the run actually beat the tenth row, and never
@@ -406,6 +417,7 @@ function wireSound(s) {
  * dropping the answer is worse than not asking.
  */
 function leaveEnd() {
+  if (advancing) return;
   if (pendingLevel) { advance(pendingLevel); return; }
   if (!sim.cheated && qualifies(sim.score)) {
     over.show(false);
@@ -456,7 +468,13 @@ function endScreen() {
 /** On to level `n`, in the same ship. */
 async function advance(n) {
   pendingLevel = 0;
-  await loadLevel(n);
+  advancing = true;
+  try {
+    await loadLevel(n);
+  } catch (err) {
+    advancing = false;
+    throw err;
+  }
   const prev = sim;
   sim = new Sim(data);
   sim.carryOver(prev);
@@ -472,6 +490,7 @@ async function advance(n) {
   clock.resync();
   screen = 'playing';
   document.body.dataset.screen = screen;
+  advancing = false;
 }
 
 async function startGame() {
@@ -717,6 +736,17 @@ const KEYS = {
   Space: 'f', KeyJ: 'f',
 };
 addEventListener('keydown', e => {
+  // A focused text field owns every key, full stop. Without this the ship's
+  // controls still run: `KeyD` is "right", it calls `preventDefault`, and the
+  // letter never reaches the field -- and the same for A, W, S and J. The
+  // screen checks below would normally keep them apart, but they depend on
+  // `screen` being right, and `screen` is exactly what a mistimed level
+  // transition can get wrong. This does not depend on it.
+  const el = document.activeElement;
+  if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+    if (e.code === 'Escape' && screen === 'name') { names.key(e.code); e.preventDefault(); }
+    return;
+  }
   // First, because the shop and the pause menu both return early and the cheat
   // is allowed in the shop -- which is where a full purse is worth having.
   if (!e.repeat) cheatKey(e.key);
