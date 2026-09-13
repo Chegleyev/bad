@@ -768,6 +768,55 @@ function cheatKey(key) {
   if (sim.disco()) { panel.update(sim); if (screen === 'shop') shop.refresh(sim); }
 }
 
+/**
+ * The engine, burning, under the ship.
+ *
+ * The flight frames stop at the hull -- they are thirty rows and the last of
+ * them is the nozzles with a two-pixel nub of flame. The flame proper lives in
+ * the thruster strip, which is fifty-nine rows and is only ever shown for the
+ * boost hop and the two flights in and out. The original had little reason to
+ * draw it the rest of the time: the ship never leaves its home row, and from
+ * there the plume runs off the bottom of the screen.
+ *
+ * What fits is the top of it, which is the bright part, so that is what this
+ * draws: rows 30 and down of a thruster frame, at the ship's own position,
+ * clipped by the field edge like anything else.
+ *
+ * No horizontal adjustment, and that is not luck. Every sprite the ship owns
+ * has its content centred on x = 15.5 in its own coordinates whatever its
+ * declared width -- 796 is 24 wide with pixels in 8..23, 799 is 26 with pixels
+ * in 6..25, both centred at 15.5 -- which is how the original swaps a flight
+ * frame for a thruster frame without the ship moving sideways.
+ */
+function exhaust(gid) {
+  const P = data.player;
+  const hull = frames[P.tiltMid] && frames[P.tiltMid].h;
+  const f = frames[gid];
+  if (!hull || !f || f.h <= hull) return null;
+  const big = renderer.bigOf(gid);
+  const s = big ? big.h / f.h : 1;
+  return {
+    hard: { x: f.x, y: f.y + hull, w: f.w, h: f.h - hull },
+    big: big ? { x: big.x, y: big.y + hull * s, w: big.w, h: big.h - hull * s } : undefined,
+    top: hull,
+  };
+}
+// A flicker rather than a ramp: 0, 1, 2, 1 of the thruster strip, a step every
+// third tick, which is the cadence every other animation in the game moves on.
+const BURN = [0, 1, 2, 1];
+function drawExhaust(frame, x, y) {
+  const P = data.player;
+  // Only under a *flight* frame. The thruster frames carry their own flame, and
+  // the wreck and the explosion should not be lit from underneath.
+  if (frame < P.tiltLeft || frame > P.tiltRight) return;
+  if (sim.player.state !== 'fly') return;
+  const gid = P.boostAnim[0] + BURN[Math.floor(clock.tick / 3) % BURN.length];
+  // Not cached: it is four property reads, and a cache would go stale on the H
+  // switch and again when the baked atlas finishes loading.
+  const b = exhaust(gid);
+  if (b) renderer.draw(b.hard, x, y + b.top, b.big);
+}
+
 const input = () => ({
   dx: (held.has('r') ? 1 : 0) - (held.has('l') ? 1 : 0),
   dy: (held.has('d') ? 1 : 0) - (held.has('u') ? 1 : 0),
@@ -814,8 +863,11 @@ function frame() {
   // A ship inside its mercy period blinks, at eight or so a second off the
   // simulation's own clock so the rate does not follow the frame rate.
   const blink = sim.player.invuln > 0 && (Math.floor(sim.tick / 4) & 1);
-  if (sim.player.state !== 'over' && !blink)
-    put(sim.player.frame, Sim.lerpX(sim.player, a), Sim.lerpY(sim.player, a));
+  if (sim.player.state !== 'over' && !blink) {
+    const sx = Sim.lerpX(sim.player, a), sy = Sim.lerpY(sim.player, a);
+    drawExhaust(sim.player.frame, sx, sy);
+    put(sim.player.frame, sx, sy);
+  }
   // The announcement banner, over everything else. Each character is its own
   // 8-pixel cell in the atlas, baked in the ramp the line was queued with.
   if (sim.msg) {
