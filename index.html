@@ -519,17 +519,30 @@
     background: linear-gradient(150deg, #d2ced9 0%, #8d8a99 24%, #4e4c58 52%,
                                         #7c7987 76%, #cfcbd8 100%);
   }
+  /* Unlit, but not anonymous: a wash of the medal's own colour, dark enough to
+     read as "off" and just enough to say which one is missing. That was the
+     whole point -- six identical dark squares tell you the count, which the
+     3/6 beside them already did. */
   .medals b {
     display: block; width: 100%; height: 100%;
     border: 1px solid #0d0c12;
     background:
       repeating-linear-gradient(180deg, rgba(0,0,0,.30) 0 1px, transparent 1px 2px),
-      linear-gradient(160deg, #262433 0%, #16151f 60%, #101017 100%);
+      linear-gradient(160deg,
+        color-mix(in srgb, var(--medal, #262433) 26%, #14131c) 0%,
+        color-mix(in srgb, var(--medal, #16151f) 18%, #111019) 60%,
+        #0e0d14 100%);
   }
+  /* Lit, each in its own colour -- `--medal` comes from the pickup's sprite.
+     The scanline stays, and so does the shape of the gradient; only the hue
+     changes, so a full set still reads as one instrument rather than six. */
   .medals i[data-on="1"] b {
     background:
       repeating-linear-gradient(180deg, rgba(0,0,0,.20) 0 1px, transparent 1px 2px),
-      linear-gradient(160deg, #efecf9 0%, var(--v-lit) 55%, #8d82c2 100%);
+      linear-gradient(160deg,
+        color-mix(in srgb, var(--medal, #c4bce3) 35%, #fff) 0%,
+        var(--medal, #c4bce3) 55%,
+        color-mix(in srgb, var(--medal, #c4bce3) 70%, #000) 100%);
   }
 
   .readout { display: flex; flex-direction: column; gap: 3px; }

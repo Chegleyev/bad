@@ -91,6 +91,16 @@ function readout(label, cls) {
 const text = (node, s) => { if (node.textContent !== s) node.textContent = s; };
 
 /** Attribute writes are cheap but not free, and most ticks change nothing. */
+/**
+ * The six DIGNITY MARKERs, in the colours the pickups wear.
+ *
+ * Sampled from the sprites rather than chosen: each icon is a chevron in a dark
+ * lens, and these are that chevron's own palette entries -- 350, 364, 378, 392,
+ * 406 and 420 in the common archive, in the order the bits sit in `+0x...`
+ * markers.
+ */
+const MEDAL = ['#0085ff', '#ff3830', '#de9930', '#ff65ff', '#4c956d', '#aaaaaa'];
+
 const flag = (node, on) => {
   const v = on ? '1' : '';
   if (node.dataset.on !== v) node.dataset.on = v;
@@ -168,26 +178,31 @@ export class Hud {
     this.rank = meter('RANK', P.rankCap, 'ladder', 'chevrons');
     this.rankNum = el('span', 'rank-n pix');
     this.rank.val.replaceWith(this.rankNum);
-    this.cond = meter('COND', 3, 'wide', 'bars');
     // Side speed has no ceiling in the game -- only a floor of 1.0 -- so the
     // scale is a chosen 1.0..4.0 and anything past it lights the last notch.
     this.speed = meter('SPEED', 7, 'notch', 'gauge');
     // Each slot is two boxes, like the panels: the outer one is the metal, the
     // inner one the face. A box-shadow ring can only be a flat colour, and flat
     // is what made these read as lilac rather than as metal.
+    //
+    // And each lights its own colour. All six lit the same violet before, which
+    // told you how many you had and never which one was missing -- and the six
+    // are a set you complete, so which one is the only question worth asking.
+    // The colours are the pickups' own, read out of the sprites: the chevron
+    // inside each lens is blue, red, amber, magenta, green, silver.
     this.medals = el('div', 'medals');
     this.medalFaces = [];
     for (let i = 0; i < 6; i++) {
       const slot = el('i');
       const face = el('b');
+      slot.style.setProperty('--medal', MEDAL[i]);
       slot.append(face);
       this.medals.append(slot);
       this.medalFaces.push(slot);
     }
     this.medalRow = row('MEDALS', this.medals);
     const rbody = el('div', 'panel-body');
-    rbody.append(this.livesRow, this.hull, this.rank, this.cond,
-                 this.speed, this.medalRow);
+    rbody.append(this.livesRow, this.hull, this.rank, this.speed, this.medalRow);
     S.body.append(rbody);
 
     // ---- under the ship: the boss ---------------------------------------
@@ -361,7 +376,6 @@ export class Hud {
     if (this.hull.dataset.low !== low) this.hull.dataset.low = low;
     fill(this.rank, p.rank, P.rankCap, '');
     text(this.rankNum, String(p.rank));
-    fill(this.cond, p.dignity, 3, '');
     fill(this.speed, Math.round((p.maxSpeed - P.sideMin) / P.sideStep) + 1, 7,
          p.maxSpeed.toFixed(1));
     let held = 0;
