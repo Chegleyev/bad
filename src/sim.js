@@ -798,10 +798,68 @@ export class Sim {
     e.fireTimer = 20;                        // [esi+0xc8] = 0x14
   }
 
-  /** Apply a pickup, by the item index the effect table at 0x1fb4 dispatches on. */
-  collect(item, arg, depth = 0) {
+  /**
+   * Has this pickup anything left to give?
+   *
+   * A full magazine, a gun already at twice its template's damage, a reload
+   * already at its floor, full hit points, top speed. In the original every one
+   * of those is silently dropped -- you fly through it, the banner says what it
+   * was, and nothing happens.
+   *
+   * Not `weaponReset`: " CONFISCATOR " still resets the speed and the reload
+   * even when the gun it hands back is one you are already holding at its cap.
+   */
+  spare(item) {
+    const P = this.data.player, p = this.player;
+    switch (P.effects[item]) {
+      case 'ammo':      return !p.gun || p.gun.mag <= p.ammo + this.inFlight;
+      case 'sideUp':    return p.maxSpeed >= P.maxSpeed * SPEED_CAP;
+      case 'rapidFire': return p.fireEvery - 1 < P.fireEveryMin;
+      case 'repair':    return p.hp >= p.maxHp && !p.decay;
+      case 'weapon': {
+        const id = P.weaponOf[item], w = P.weapons[id];
+        return !!w && p.weapon === id && p.damage >= w.damage * P.weaponUpCap;
+      }
+      default: return false;
+    }
+  }
+
+  /**
+   * The item index of " 50 CREDITS ", found rather than written down.
+   *
+   * The compensation below is the game's own pickup, not a number invented for
+   * it -- which is the pattern `sub_204d` already set for a marker you hold:
+   * take one twice and it announces item 18, " 10 CREDITS ", and pays that.
+   */
+  get sparePay() {
+    if (this._sparePay === undefined) {
+      const P = this.data.player;
+      const k = Object.keys(P.effects).find(
+        (i) => P.effects[i] === 'credits' && P.itemArg[i] === 5);
+      this._sparePay = k === undefined ? null : Number(k);
+    }
+    return this._sparePay;
+  }
+
+  /**
+   * Apply a pickup, by the item index the effect table at 0x1fb4 dispatches on.
+   *
+   * `paid` is the shop: a purchase that turns out to be useless must not hand
+   * fifty credits back, or a ten-credit item nobody needs is a mint.
+   */
+  collect(item, arg, depth = 0, paid = false) {
     const P = this.data.player, p = this.player;
     if (arg === undefined) arg = P.itemArg[item];
+    // A pickup with nothing to give is worth fifty credits instead. A departure
+    // from the original, where it is worth nothing at all -- and the one place
+    // the port makes the game kinder rather than more faithful, because a run
+    // with a full magazine flying through its tenth " WEAPON BOOST " is being
+    // punished for doing well.
+    if (!paid && this.sparePay !== null && this.spare(item)) {
+      this.announce(this.sparePay, this.data.text.playerColour);
+      p.credits = Math.min(P.creditCap, p.credits + P.itemArg[this.sparePay]);
+      return;
+    }
     // Every handler in 0x1d00..0x2300 calls `sub_5808` first, so picking
     // anything up says what it was -- except " RANDOMIZER ", which never gets
     // that far: `sub_20ad` replaces both the pickup and the item index and
@@ -868,7 +926,7 @@ export class Sim {
         if (depth > 8) break;
         const g = P.dropTable[this.rnd()];               // `rnd` already returns 0..255
         const kind = P.dropItems[g];
-        if (kind) this.collect(kind.item, kind.arg, depth + 1);
+        if (kind) this.collect(kind.item, kind.arg, depth + 1, paid);
         break;
       }
       case 'marker': {                               // `sub_1fc7`

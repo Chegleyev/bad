@@ -51,6 +51,18 @@ Three things are settings a query string away:
 * `?stats=1` puts a counter line under the field -- tick, entities, shots,
   drops, frame rate. It is a developer's readout, off by default.
 
+Two rules are deliberately not the original's:
+
+* **" SIDE SPEED UP " stops at four times the starting speed.** `sub_1e8b` has
+  no ceiling at all, and a long enough run ends with a ship that crosses the
+  field faster than it can be aimed.
+* **A pickup with nothing left to give is worth 50 credits.** A full magazine, a
+  gun already at its damage cap, a reload at its floor, full hull, top speed —
+  the original drops all of those on the floor. Being punished for doing well is
+  not a mechanic worth preserving. The compensation is the game's own
+  " 50 CREDITS " pickup, announced as such. Buying one in the shop still pays
+  nothing back.
+
 ## Build
 
     npm install

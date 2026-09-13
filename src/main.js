@@ -281,7 +281,7 @@ let pendingLevel = 0;
 // The shop buys the same way a dropped prize is caught: the pickup's own
 // handler runs, and then the purse pays for it.
 const shop = new Shop(frame3, data, atlas, (row) => {
-  sim.collect(row.item);
+  sim.collect(row.item, undefined, 0, true);   // paid for: no compensation
   sim.player.credits -= row.price;
   // The HUD is driven off the tick, and the tick is stopped.
   panel.update(sim);
