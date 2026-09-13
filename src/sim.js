@@ -17,38 +17,6 @@ const FP = 65536;
 // faster than it can be aimed. Four is where it stops being a ship and starts
 // being a cursor. A departure from the original, and a deliberate one.
 const SPEED_CAP = 4;
-/**
- * How much a homing missile sinks each tick, on top of its heading.
- *
- * Not the original's -- `sub_37f9` is thirteen instructions of move-and-steer
- * and has no such term, and nothing else in the object does either. It is here
- * because of what the numbers say about the level 5 boss, which has two guns.
- *
- * Searched over 3 351 dodge plans, counting the share that survive. Without it,
- * one missile at base speed: 18%. Two, the second sixty ticks later: 11% -- and
- * at twice the speed, still 12%. That is the problem. A missile that levels out
- * at the ship's altitude flies along the rail at three pixels a tick, and a ship
- * that manages one or two cannot leave the rail at all, so going faster buys
- * nothing.
- *
- * With the sink the boss stays hard where the ship is slow and speed starts to
- * pay, which is what the half unit `sub_327a` takes off you for dying is
- * supposed to mean. Averaged over twelve launch geometries, the share of plans
- * that survive:
- *
- *     sink    speed 1   speed 2   speed 3.5
- *     0.200     21.3%     30.2%       32.4%
- *     0.225     24.1%     34.8%       36.9%
- *     0.250     25.7%     35.5%       37.4%
- *
- * The response is a step rather than a ramp -- 0.200 through 0.220 are within a
- * point of each other and 0.225 jumps -- so this is not a dial to turn finely.
- * What it does *not* change is how long a missile lasts: one chasing a fleeing
- * ship leaves through the side of the screen rather than the bottom, at 158
- * ticks for 0.15, 0.2 and 0.25 alike. The sink buys room, not time.
- */
-const MISSILE_SINK = 0.225;
-
 export class Entity {
   constructor(tpl, gid, x, y) {
     this.tpl = tpl; this.gid = gid;
@@ -1329,10 +1297,19 @@ export class Sim {
     const H = b.homing;
     if (!H) return;
     if (--b.life <= 0) { b.dead = true; return; }
-    // Every tick, not only on a steer: the heading is reset from the table each
-    // time it turns, so this has to be a nudge to the position rather than a
-    // term in the velocity.
-    b.y += Math.round(MISSILE_SINK * FP);
+    // A missile sank 0.225 of a pixel a tick here for a while, which the
+    // original does not do: `sub_37f9` is thirteen instructions of move-and-
+    // steer and has no such term. It was added because a missile that levels
+    // out at the ship's altitude flies along the rail at three pixels a tick,
+    // and over 3 351 dodge plans only 18% survived one -- 11% survived two, and
+    // at twice the ship's speed still 12%, so running was not an answer either.
+    //
+    // The premise was wrong. A missile *can* be shot down: its interest word is
+    // 0x0f where every other enemy shot is 0x03, and the 0x04 in the difference
+    // is the player's own fire. That was missing from `Sim.step`, not from the
+    // game. With it restored the level 5 boss is beaten from every gun in the
+    // ladder with the missiles left to fly exactly as the original flies them,
+    // so the sink is gone and the port is one departure closer to the game.
     if (--b.steerIn > 0) return;
     b.steerIn = H.steer;
     const want = this.aimDir(b.x, b.y);
