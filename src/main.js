@@ -631,6 +631,11 @@ async function startGame() {
       sim.player.damage = Math.round(w.damage * P.weaponUpCap);
       sim.player.fireEvery = P.fireEveryMin;
       sim.player.ammo = w.mag;
+      // And the speed that goes with a gun at its cap. A ship that has been
+      // collecting " SIDE SPEED UP " all the way to this wave is not still on
+      // the one it starts with, and for the narrow guns the speed is not a
+      // comfort -- a cannon has to get under the thing it is shooting.
+      sim.player.maxSpeed = Math.min(P.maxSpeed * 3, 3);
     }
   }
   if (q.has('item')) sim.collect(Number(q.get('item')));

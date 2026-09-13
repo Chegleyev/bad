@@ -38,20 +38,42 @@ const SHIP_W = 26, SHIP_H = 30;
  * this hit me where I am going to be" needs both, so the trajectory is walked
  * once a tick, with the real physics, and everything else reads off it.
  */
-function traj(sim, dx, n) {
+function traj(sim, dx, n, hold = n) {
   const p = sim.player, P = sim.data.player;
   let x = p.x / FP, vx = p.vx / FP;
   const a = P.accel, m = p.maxSpeed;
   const out = new Float64Array(n + 1);
   out[0] = x;
   for (let i = 1; i <= n; i++) {
-    if (dx) vx = Math.max(-m, Math.min(m, vx + a * dx));
+    const d = i <= hold ? dx : 0;
+    if (d) vx = Math.max(-m, Math.min(m, vx + a * d));
     else vx += vx > 0 ? -Math.min(a, vx) : Math.min(a, -vx);
     x = Math.max(P.minX, Math.min(P.maxX, x + vx));
     out[i] = x;
   }
   return out;
 }
+
+/**
+ * The moves the bot chooses between.
+ *
+ * Not three -- hold left, hold right, let go -- but nine: each direction held
+ * for a while and then released. On the ship this was written for, one pixel a
+ * tick and half a pixel of acceleration, the difference hardly exists: it stops
+ * in two ticks, so "hold" and "hold then coast" arrive in much the same place
+ * and re-deciding every tick is a good enough brake.
+ *
+ * At three pixels a tick it is the whole game. Acceleration does not scale with
+ * the top speed, so a fast ship still takes six ticks to stop and covers nine
+ * pixels doing it; a controller whose only plan is "keep going" sails past the
+ * column it is trying to reach, turns round, and sails past it again. From the
+ * outside that reads as caution -- fewer deaths, fewer kills, less of the level
+ * -- and it is really a ship that cannot park. Letting a plan say *when to stop
+ * pushing* is what makes speed worth having, and it is what a player's thumb
+ * does without being told.
+ */
+const PLANS = [[0, 0], [-1, 5], [-1, 12], [-1, 26], [-1, 90],
+                       [1, 5], [1, 12], [1, 26], [1, 90]];
 
 const HORIZON = 90;
 
@@ -72,7 +94,7 @@ const HORIZON = 90;
 function threat(sim, xs) {
   const p = sim.player;
   const py = p.y / FP;
-  let t = 0;
+  let t = 0, graze = 0;
   /**
    * One thing falling at the ship, in expected hits.
    *
@@ -104,7 +126,8 @@ function threat(sim, xs) {
     // volleys, so a near miss was vetoing four fifths of a volley, and the ship
     // would sit with a firing solution in front of it refusing to take it
     // because something was going to pass fourteen pixels away.
-    t += weight * urgency * (near <= 0 ? 1 : 0.02 * (1 - near / 14));
+    if (near <= 0) t += weight * urgency;
+    else graze += weight * urgency * (1 - near / 14);
   };
   for (const b of sim.enemyShots) {
     if (b.dead) continue;
@@ -130,7 +153,12 @@ function threat(sim, xs) {
   const P = sim.data.player, x = xs[xs.length - 1];
   t += Math.max(0, 26 - (x - P.minX)) * 0.004;
   t += Math.max(0, 26 - (P.maxX - x)) * 0.004;
-  return t;
+  // Near misses are a tie-breaker and are capped like one. Uncapped they add
+  // up: ten things passing within fourteen pixels outscored a firing solution,
+  // and the faster the ship the more often the three candidates differ on them,
+  // so a ship that could dodge more simply dodged more -- fewer deaths, fewer
+  // kills, less of the level. Flinching is not free.
+  return t + Math.min(0.25, graze);
 }
 
 /**
@@ -414,9 +442,23 @@ function approach(sim, x, gun, tgts) {
 function decide(sim, gun) {
   const tgts = targets(sim);
   const przs = prizes(sim);
+  // Everything the ship *wants* is a question about distance, and every horizon
+  // below was written in ticks with a ship that moves one pixel in one of them.
+  // At three pixels a tick the same numbers ask about the far side of the
+  // screen: ninety ticks is two hundred and seventy pixels, so all three
+  // candidates ended up pinned against a wall and scored the same. That, and
+  // not the game, is why a faster ship measured *worse* at everything --
+  // fewer kills, less of the level, and fewer deaths, which is the signature of
+  // a bot that has stopped engaging rather than one that is struggling.
+  //
+  // So the wanting is paced: the samples stay at the same *distances* whatever
+  // the ship's top speed. Dodging is left in ticks, because a bullet arrives
+  // when it arrives.
+  const pace = Math.max(1, sim.player.maxSpeed);
   const scores = [];
-  for (const dx of [-1, 0, 1]) {
-    const xs = traj(sim, dx, HORIZON);
+  for (const [dx, hold] of PLANS) {
+    const xs = traj(sim, dx, HORIZON, hold);
+    const at = (k) => xs[Math.max(1, Math.round(k / pace))];
     // A firing solution anywhere along the trajectory, not only at the near end
     // of it. An exact hit test has no gradient: a target sixty pixels away is
     // worth exactly zero from here and also exactly zero nine pixels closer, so
@@ -428,14 +470,14 @@ function decide(sim, gun) {
     // available in a second and a half.
     let value = 0;
     for (const k of [8, 22, 40, 62, 88])
-      value = Math.max(value, volleyValue(sim, xs[k], gun, tgts) * (1 - k / 150));
+      value = Math.max(value, volleyValue(sim, at(k), gun, tgts) * (1 - k / 150));
     // A hit taken is worth far more than a volley landed, and not by a little:
     // it costs a life, a rung of the weapon ladder and half a unit of speed,
     // and the speed never comes back. Eight volleys is the exchange rate, and
     // a bot that will not take that trade is a bot that lives.
     scores.push(value
-              + approach(sim, xs[HORIZON], gun, tgts) * 0.45
-              + want(sim, xs[14], przs) * 1.8
+              + approach(sim, at(HORIZON), gun, tgts) * 0.45
+              + want(sim, at(14), przs) * 1.8
               - threat(sim, xs) * 8);
   }
 
@@ -449,10 +491,18 @@ function decide(sim, gun) {
   // little; it is a trade worth making for a ship that looks steered.
   const st = sim.bot || (sim.bot = { dx: 0, at: -99 });
   let best = 0;
-  for (let i = 1; i < 3; i++) if (scores[i] > scores[best]) best = i;
-  const bestDx = best - 1;
-  const held = scores[st.dx + 1];
-  const fresh = sim.tick - st.at < 6;
+  for (let i = 1; i < scores.length; i++) if (scores[i] > scores[best]) best = i;
+  const bestDx = PLANS[best][0];
+  // What the plan in hand is worth now: the best of the plans that start by
+  // pushing the way the ship is already pushing.
+  let held = -Infinity;
+  for (let i = 0; i < scores.length; i++)
+    if (PLANS[i][0] === st.dx) held = Math.max(held, scores[i]);
+  // Paced as well: six ticks of the wrong direction is six pixels on the ship
+  // this was tuned on and eighteen on a fast one, and eighteen plus the room it
+  // then needs to stop is most of a fly. Commitment should be a distance held,
+  // not a time held.
+  const fresh = sim.tick - st.at < Math.max(2, Math.round(6 / pace));
   if (bestDx !== st.dx && scores[best] - held > (fresh ? 0.3 : 0.07)) {
     st.dx = bestDx;
     st.at = sim.tick;

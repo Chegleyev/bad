@@ -54,11 +54,15 @@ const only = arg('weapon', null);
 // gun from one to the other. Pinned like the damage tier, and for the same
 // reason -- a death drops it back and an unpinned run measures the ladder.
 const reload = arg('reload', null);
-// And the same for " SIDE SPEED UP ", which starts at 1 and stops at 4. Nobody
-// arrives at level 5 on a cold ship: they arrive on whatever four levels of
-// pickups built. Pinning it is the only way to ask what a level is like for the
-// ship that actually reaches it.
-const speed = arg('speed', null);
+// And the same for " SIDE SPEED UP ", which starts at 1 and stops at 4.
+//
+// Three by default, not the one the ship is born with. Nobody arrives at level
+// 5 on a cold ship -- they arrive on whatever four levels of pickups built --
+// and speed is not a comfort for the narrow guns, it is how they work at all:
+// a cannon has to be under the thing it is shooting, and getting under things
+// is what speed buys. Measured, it is worth more to a cannon than doubling its
+// damage. `--speed 1` is the cold ship, for the comparison.
+const speed = arg('speed', 3);
 
 const load = (n) =>
   JSON.parse(readFileSync(new URL(`../public/data/level${n}.json`, import.meta.url)));
@@ -179,7 +183,7 @@ const ORDER = Object.keys(NAMES).map(Number).filter(id => !only || NAMES[id] ===
 
 const pad = (s, n) => String(s).padStart(n);
 for (const tier of tiers) {
-  console.log(`\n${'='.repeat(78)}\ndamage x${tier}${tier === 2 ? '  (the upgrade ceiling)' : '  (as picked up)'}${reload ? `, reload every ${reload}` : ''}${speed ? `, speed ${speed}` : ''}\n`);
+  console.log(`\n${'='.repeat(78)}\ndamage x${tier}${tier === 2 ? '  (the upgrade ceiling)' : '  (as picked up)'}${reload ? `, reload every ${reload}` : ''}, speed ${speed}\n`);
   console.log('  level  weapon           won  stalled  through  deaths/min  kills/min  %/min  starved  caught');
   for (const level of levels) {
     for (const id of ORDER) {
