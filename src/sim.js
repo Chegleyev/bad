@@ -1267,6 +1267,15 @@ export class Sim {
   /** Give a new shot whatever steering its template asks for. */
   armShot(b, f) {
     if (f.homing) {
+      // A missile can be shot down, and it is the only projectile in the game
+      // that can. Every one of the 2 702 ordinary enemy shots is layer 0x80
+      // wanting 0x03; all five homing ones want 0x0f, which is 0x03 plus the
+      // 0x0c an *enemy body* wants -- and 0x04 in there is the player's own
+      // shot. `sub_56a6` pairs on those words alone, and the object grid it
+      // walks holds every kind at once, so nothing else is needed to make it
+      // true. Hit points are the same field as damage (`+0x5c`), so the missile
+      // takes as much as it deals.
+      b.hp = f.damage || 1;
       b.homing = f.homing;
       // `sub_37e6`: the lifetime is shortened by a random amount, so a volley
       // does not all expire on the same tick.
@@ -2002,6 +2011,30 @@ export class Sim {
           d.decay += this.player.damage;
           b.dead = true;                 // the pickup deals far more than a shot can take
           this.sfx('hit', d.x / FP);
+          this.returnRound();
+          break;
+        }
+      }
+      if (b.dead) continue;
+      // And against the homing missiles, which are the one kind of enemy fire
+      // whose interest word takes an interest in being shot at. The exchange is
+      // symmetric the way `sub_57a8` makes every exchange symmetric -- each
+      // side's `+0x5c` goes into the other -- and health and damage are that
+      // same field, so a trident bolt at its cap carries 56 against a missile's
+      // 30 and comes out the other side still flying, while a cannon shot at 11
+      // trades itself for a third of one.
+      for (const m of this.enemyShots) {
+        if (m.dead || !m.hp) continue;
+        if (!pairs(P.bulletLayer, P.bulletHits, m.layer, m.hits)) continue;
+        const mf = this.frameOf(m.sprite);
+        if (!mf) continue;
+        if (!touch(m.layer, m.x / FP, m.y / FP, mf, this.maskOf(m.sprite),
+                   P.bulletLayer, b.x / FP, b.y / FP, bf, bm)) continue;
+        const dealt = this.player.damage;
+        if ((m.hp -= dealt) <= 0) m.dead = true;
+        this.sfx('hit', m.x / FP);
+        if (dealt <= (m.damage || 1)) {
+          b.dead = true;
           this.returnRound();
           break;
         }

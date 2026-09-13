@@ -283,6 +283,23 @@ function targets(sim) {
       urgent: (e.y - e.py) > 0 ? 1.6 : 1,
     });
   }
+  // A homing missile is a target too, and the only piece of enemy fire that is
+  // one: its interest word takes the player's shots, which nothing else in the
+  // air does. Worth more than a fly of the same size, because it is aimed and
+  // it does not miss -- and cheap, since it carries as many hit points as it
+  // does damage and no boss part is that thin.
+  for (const b of sim.enemyShots) {
+    if (b.dead || !b.hp) continue;
+    const f = sim.frameOf(b.sprite);
+    if (!f) continue;
+    const by = b.y / FP;
+    if (by > py - 12) continue;
+    out.push({
+      x: b.x / FP, y: by, w: f.w, h: f.h,
+      vx: (b.x - b.px) / FP, vy: (b.y - b.py) / FP,
+      hp: Math.max(1, b.hp), urgent: 2.5,
+    });
+  }
   return out;
 }
 
