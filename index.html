@@ -685,6 +685,51 @@
   .score-row[data-new="1"] .score-n { color: #fff; }
   .score-row[data-new="1"] .score-date { color: var(--v-lit); }
 
+  /* ---- the boot veil ---------------------------------------------------- */
+  #boot {
+    position: fixed; inset: 0; z-index: 100;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 20px; background: var(--bg);
+    transition: opacity .4s ease;
+  }
+  #boot.gone { opacity: 0; pointer-events: none; }
+  /* Eight squares on a circle with a falling opacity, and the whole ring
+     stepped round one position at a time. Stepped, not smooth: a spinner that
+     eases is a spinner from another program, and everything else on this page
+     moves on a grid. */
+  .boot-ring { position: relative; width: 44px; height: 44px;
+               animation: boot-spin 1s steps(8) infinite; }
+  .boot-ring i {
+    position: absolute; top: 0; left: 50%; width: 6px; height: 6px;
+    margin-left: -3px; background: var(--v-mid); transform-origin: 3px 25px;
+  }
+  .boot-ring i:nth-child(1) { transform: rotate(0deg);   opacity: 1; }
+  .boot-ring i:nth-child(2) { transform: rotate(45deg);  opacity: .82; }
+  .boot-ring i:nth-child(3) { transform: rotate(90deg);  opacity: .68; }
+  .boot-ring i:nth-child(4) { transform: rotate(135deg); opacity: .55; }
+  .boot-ring i:nth-child(5) { transform: rotate(180deg); opacity: .43; }
+  .boot-ring i:nth-child(6) { transform: rotate(225deg); opacity: .33; }
+  .boot-ring i:nth-child(7) { transform: rotate(270deg); opacity: .24; }
+  .boot-ring i:nth-child(8) { transform: rotate(315deg); opacity: .16; }
+  @keyframes boot-spin { to { transform: rotate(360deg); } }
+  .boot-text {
+    font-size: calc(var(--pix-unit) * 1.6); line-height: 1;
+    letter-spacing: 6px; color: var(--v-lit);
+  }
+  /* The bar is the honest part: three megabytes over a thin line is a long
+     time to look at a spinner that knows nothing. */
+  .boot-bar {
+    width: 180px; height: 2px; background: #1c1a24; overflow: hidden;
+  }
+  .boot-bar i {
+    display: block; width: 0; height: 100%; background: var(--v-mid);
+    transition: width .25s ease;
+  }
+  /* Someone who has asked not to be moved gets the bar and no rotation. */
+  @media (prefers-reduced-motion: reduce) {
+    .boot-ring { animation: none; }
+  }
+
   /* ---- the credits ------------------------------------------------------ */
   /* The same left edge and the same measure as the score table, because they
      are two pages of one book. Two columns: a dim label and a bright value.
@@ -811,5 +856,18 @@
   <span>and</span>
   <a id="webfoot" title="Watch the Webfoot card">Webfoot Technologies</a>
 </footer>
+
+<!-- The boot veil. It is in the document rather than made by script so that it
+     is up at the first paint: the module is deferred and then waits on three
+     megabytes of fetches, and what showed in the meantime was the bare
+     skeleton -- header, empty panels, footer -- laid out against the CSS
+     fallbacks and then jumping into place when `resize` finally ran. -->
+<div id="boot">
+  <div class="boot-ring" aria-hidden="true">
+    <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+  </div>
+  <div class="boot-text pix">LOADING</div>
+  <div class="boot-bar"><i></i></div>
+</div>
 
 <script type="module" src="src/main.js"></script>

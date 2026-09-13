@@ -82,12 +82,15 @@ class Art {
     this.big = null;
     this.want = false;
     this.show();
-    this.fetch(base);
+    // Resolves either way: the veil waits on this, and a baker nobody ran is
+    // not a reason to sit on a spinner.
+    this.ready = new Promise((done) => this.fetch(base, done));
   }
 
   /** Load the baked one, once. Absent -- nobody ran the baker -- is not an error. */
-  fetch(base) {
+  fetch(base, done = () => {}) {
     const img = new Image();
+    img.onerror = done;
     img.onload = () => {
       const w = img.naturalWidth, h = img.naturalHeight;
       const c = document.createElement('canvas');
@@ -103,6 +106,7 @@ class Art {
       ctx.putImageData(d, 0, 0);
       this.big = c;
       this.show();
+      done();
     };
     img.src = `${base}data/menu4x.png`;
   }
@@ -155,6 +159,7 @@ export class Menu {
 
     this.root = el('div', 'screen menu');
     this.art = art(menu, bytes, base);
+    this.ready = this.art.ready;
     this.root.append(this.art.node);
     const list = el('nav', 'items');
     this.nodes = this.items.map((it, i) => {

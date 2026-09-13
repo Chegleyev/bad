@@ -13,6 +13,76 @@ import { readPref, writePref } from './prefs.js';
 import { qualifies, add as addScore, rememberName,
          load as scoreRows } from './scores.js';
 
+/**
+ * The boot veil: up from the first paint, down when there is something to look
+ * at.
+ *
+ * The bar counts *bytes*, not files. Counting files left it on nothing for the
+ * seven seconds level 1's manifest takes over a thin line and then jumping a
+ * fifth at a time, which reads as stuck rather than as slow. `grab` feeds it
+ * from the response stream as the chunks arrive.
+ *
+ * The denominator is a fixed estimate of the startup payload rather than a
+ * real total: `Content-Length` only turns up a response at a time, so a true
+ * total is not known until the last one has started. Being wrong about it
+ * costs nothing -- the bar is clamped below full and `finish` snaps it there.
+ */
+const boot = {
+  el: document.getElementById('boot'),
+  bar: document.querySelector('#boot .boot-bar i'),
+  got: 0,
+  total: 2.75e6,
+  bytes(n) {
+    if (this.finished) return;          // levels load over this bar's grave
+    this.got += n;
+    if (this.bar) this.bar.style.width = `${Math.min(96, this.got / this.total * 100)}%`;
+  },
+  finish() {
+    this.finished = true;
+    if (!this.el) return;
+    if (this.bar) this.bar.style.width = '100%';
+    this.el.classList.add('gone');
+    // Out of the document once it has faded, not merely transparent: a fixed
+    // layer over the whole page is a compositor layer for the rest of the run.
+    this.el.addEventListener('transitionend', () => this.el.remove(), { once: true });
+    setTimeout(() => this.el.remove(), 1200);      // ...and if the fade is off
+  },
+};
+
+/**
+ * Fetch, reporting progress as it goes. -> the bytes.
+ *
+ * Falls back to `arrayBuffer` when the response cannot be streamed, which is
+ * every response from a `file://` page and some from a proxy: the bar then
+ * moves in one jump for that file and nothing else changes.
+ */
+async function grab(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`${r.status} ${url}`);
+  if (!r.body) {
+    const b = new Uint8Array(await r.arrayBuffer());
+    boot.bytes(b.length);
+    return b;
+  }
+  const reader = r.body.getReader();
+  const chunks = [];
+  let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    got += value.length;
+    boot.bytes(value.length);
+  }
+  const out = new Uint8Array(got);
+  let at = 0;
+  for (const c of chunks) { out.set(c, at); at += c.length; }
+  return out;
+}
+
+const text = new TextDecoder();
+const grabJson = (url) => grab(url).then(b => JSON.parse(text.decode(b)));
+
 const canvas = document.getElementById('field');
 // The counters under the foot are a developer's readout, not a player's, so
 // they are off unless `?stats=1` asks for them. Hidden rather than emptied: an
@@ -30,15 +100,11 @@ const base = import.meta.env.BASE_URL;
 const startLevel = Math.min(8, Math.max(1, Number(new URLSearchParams(location.search)
   .get('level')) || 1));
 let level = startLevel;
-let data = await fetch(`${base}data/level${level}.json`).then(r => r.json());
-let atlas = await fetch(`${base}data/${data.atlas.file}`)
-  .then(r => r.arrayBuffer()).then(b => new Uint8Array(b));
+let data = await grabJson(`${base}data/level${level}.json`);
+let atlas = await grab(`${base}data/${data.atlas.file}`);
 
-const menuArt = await fetch(`${base}data/menu.json`).then(r => r.json()).catch(() => null);
-const menuBytes = menuArt
-  ? await fetch(`${base}data/${menuArt.file}`).then(r => r.arrayBuffer())
-      .then(b => new Uint8Array(b))
-  : null;
+const menuArt = await grabJson(`${base}data/menu.json`).catch(() => null);
+const menuBytes = menuArt ? await grab(`${base}data/${menuArt.file}`) : null;
 
 const audio = new Audio(base);
 
@@ -84,11 +150,11 @@ let bigAt = 0;                    // the level whose baked atlas is uploaded
 async function loadBig(n) {
   if (!hiOn || bigAt === n) return;
   try {
-    const meta = await fetch(`${base}data/atlas${n}.big.json`).then(r => {
-      if (!r.ok) throw new Error('none'); return r.json();
-    });
-    const blob = await fetch(`${base}data/atlas${n}.big.png`).then(r => r.blob());
-    renderer.setBig(await createImageBitmap(blob), meta);
+    const meta = await grabJson(`${base}data/atlas${n}.big.json`);
+    // Through `grab` as well: at a megabyte and a third this is half of what a
+    // first visit waits for, and a bar that ignored it would stall at the end.
+    const png = await grab(`${base}data/atlas${n}.big.png`);
+    renderer.setBig(await createImageBitmap(new Blob([png])), meta);
     bigAt = n;
   } catch {
     // Nobody has run `upscale/atlas.py` for this level; the hard atlas stands.
@@ -790,3 +856,24 @@ function frame() {
 if (!menu || q.has('tick') || q.has('nogates')) startGame();
 else { document.body.dataset.screen = 'menu'; menu.show(true); }
 requestAnimationFrame(frame);
+
+/**
+ * Lift the veil once there is a finished picture behind it.
+ *
+ * Three things, and each of them moved the layout when it arrived late: the
+ * display face, which makes the head and the foot taller; the baked title,
+ * which swaps under the eye; and one composed frame, after which `resize` has
+ * measured the real page rather than the CSS fallbacks. The race is a guard
+ * against a network that never answers -- a veil that sticks is worse than a
+ * page that shifts.
+ */
+(async () => {
+  const settled = Promise.all([
+    document.fonts?.ready ?? Promise.resolve(),
+    menu ? menu.ready : Promise.resolve(),
+  ]);
+  await Promise.race([settled, new Promise(r => setTimeout(r, 10000))]);
+  resize();
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  boot.finish();
+})();
