@@ -565,6 +565,13 @@
   }
   .shop-row[data-off="1"] { color: #9d98b0; }
   .shop-row[data-off="1"] .shop-row-price { color: var(--r-mid); }
+  /* Already at the top of it: greyed further than merely unaffordable, and the
+     price goes with it. Nothing here is red -- red is "you are short", and
+     being short is a thing that changes. */
+  .shop-row[data-spare="1"] { color: #5f5b70; cursor: default; }
+  .shop-row[data-spare="1"] .shop-row-ico { opacity: .4; }
+  .shop-row[data-spare="1"] .shop-row-price,
+  .shop-row[data-spare="1"] .shop-row-have { color: #5f5b70; }
   .shop-row-ico { width: 28px; display: flex; justify-content: center; }
   .shop-row-name { flex: 1; }
   .shop-row-have { font-size: 8px; letter-spacing: .18em; color: var(--v-mid); }

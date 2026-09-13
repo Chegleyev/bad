@@ -309,22 +309,35 @@ export class Shop {
   }
 
   /** Redraw prices and affordability against the player's purse. */
+  /**
+   * Redraw prices, affordability, and what there is no point buying.
+   *
+   * Two greys, and they mean different things. `off` is "not this run, you
+   * cannot afford it"; `spare` is "not ever, you are already at the top of it".
+   * A caught pickup with nothing to give is worth fifty credits, but a *bought*
+   * one is worth nothing at all -- so the shop says so and refuses, rather than
+   * taking the money and doing nothing.
+   */
   refresh(sim) {
     const p = sim.player;
     this.sim = sim;
     text(this.balance, `${p.credits * 10} CR`);
     this.rows.forEach((r, i) => {
       const n = this.nodes[i];
+      const spare = sim.spare(r.item);
       const afford = p.credits >= r.price;
-      if (n.dataset.off !== (afford ? '' : '1')) n.dataset.off = afford ? '' : '1';
+      const off = spare || !afford ? '1' : '';
+      if (n.dataset.off !== off) n.dataset.off = off;
+      if (n.dataset.spare !== (spare ? '1' : '')) n.dataset.spare = spare ? '1' : '';
       const held = r.item >= 7 && r.item <= 12 && ((p.markers >> (r.item - 7)) & 1);
-      text(n.children[2], held ? 'HELD' : '');
+      text(n.children[2], spare ? 'MAX' : held ? 'HELD' : '');
     });
   }
 
   buy() {
     const r = this.rows[this.at];
     if (!this.sim || this.sim.player.credits < r.price) return;
+    if (this.sim.spare(r.item)) return;      // nothing to sell you
     this.onBuy(r);
     this.refresh(this.sim);
   }

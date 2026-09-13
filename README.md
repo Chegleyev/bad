@@ -51,7 +51,7 @@ Three things are settings a query string away:
 * `?stats=1` puts a counter line under the field -- tick, entities, shots,
   drops, frame rate. It is a developer's readout, off by default.
 
-Two rules are deliberately not the original's:
+Three rules are deliberately not the original's:
 
 * **" SIDE SPEED UP " stops at four times the starting speed.** `sub_1e8b` has
   no ceiling at all, and a long enough run ends with a ship that crosses the
@@ -62,6 +62,17 @@ Two rules are deliberately not the original's:
   not a mechanic worth preserving. The compensation is the game's own
   " 50 CREDITS " pickup, announced as such. Buying one in the shop still pays
   nothing back.
+
+* **A homing missile sinks 0.225 of a pixel a tick.** `sub_37f9` has no such
+  term — it is thirteen instructions of move-and-steer and nothing else — and
+  without one the level 5 boss, which has two guns, is close to unanswerable.
+  Searched over 3 351 dodge plans, counting the share that survive: one missile
+  at base speed, 18%; two of them sixty ticks apart, 11% — and at twice the
+  speed, still 12%. A missile that levels out at the ship's altitude runs along
+  the rail at three pixels a tick, so going faster buys nothing. With the sink,
+  averaged over twelve launch geometries, 24% of plans survive at base speed and
+  37% at three and a half times it: still hard where the ship is slow, and speed
+  now pays — which is what the speed a death costs you is supposed to mean.
 
 ## Build
 

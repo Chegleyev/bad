@@ -17,6 +17,37 @@ const FP = 65536;
 // faster than it can be aimed. Four is where it stops being a ship and starts
 // being a cursor. A departure from the original, and a deliberate one.
 const SPEED_CAP = 4;
+/**
+ * How much a homing missile sinks each tick, on top of its heading.
+ *
+ * Not the original's -- `sub_37f9` is thirteen instructions of move-and-steer
+ * and has no such term, and nothing else in the object does either. It is here
+ * because of what the numbers say about the level 5 boss, which has two guns.
+ *
+ * Searched over 3 351 dodge plans, counting the share that survive. Without it,
+ * one missile at base speed: 18%. Two, the second sixty ticks later: 11% -- and
+ * at twice the speed, still 12%. That is the problem. A missile that levels out
+ * at the ship's altitude flies along the rail at three pixels a tick, and a ship
+ * that manages one or two cannot leave the rail at all, so going faster buys
+ * nothing.
+ *
+ * With the sink the boss stays hard where the ship is slow and speed starts to
+ * pay, which is what the half unit `sub_327a` takes off you for dying is
+ * supposed to mean. Averaged over twelve launch geometries, the share of plans
+ * that survive:
+ *
+ *     sink    speed 1   speed 2   speed 3.5
+ *     0.200     21.3%     30.2%       32.4%
+ *     0.225     24.1%     34.8%       36.9%
+ *     0.250     25.7%     35.5%       37.4%
+ *
+ * The response is a step rather than a ramp -- 0.200 through 0.220 are within a
+ * point of each other and 0.225 jumps -- so this is not a dial to turn finely.
+ * What it does *not* change is how long a missile lasts: one chasing a fleeing
+ * ship leaves through the side of the screen rather than the bottom, at 158
+ * ticks for 0.15, 0.2 and 0.25 alike. The sink buys room, not time.
+ */
+const MISSILE_SINK = 0.225;
 
 export class Entity {
   constructor(tpl, gid, x, y) {
@@ -1212,6 +1243,10 @@ export class Sim {
     const H = b.homing;
     if (!H) return;
     if (--b.life <= 0) { b.dead = true; return; }
+    // Every tick, not only on a steer: the heading is reset from the table each
+    // time it turns, so this has to be a nudge to the position rather than a
+    // term in the velocity.
+    b.y += Math.round(MISSILE_SINK * FP);
     if (--b.steerIn > 0) return;
     b.steerIn = H.steer;
     const want = this.aimDir(b.x, b.y);
