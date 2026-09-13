@@ -161,6 +161,7 @@ function run({ level, weapon, tier, seed }) {
   const mins = ticks / data.tickHz / 60;
   return {
     won: sim.won, stalled, ticks, deaths, kills: sim.kills, score: sim.score,
+    caught: sim.picked / Math.max(1, sim.dropped || 1),
     shots: volleys * barrels,
     starved: starved / Math.max(1, ticks),
     progress: 100 * sim.pc / sim.prog.length,
@@ -179,7 +180,7 @@ const ORDER = Object.keys(NAMES).map(Number).filter(id => !only || NAMES[id] ===
 const pad = (s, n) => String(s).padStart(n);
 for (const tier of tiers) {
   console.log(`\n${'='.repeat(78)}\ndamage x${tier}${tier === 2 ? '  (the upgrade ceiling)' : '  (as picked up)'}${reload ? `, reload every ${reload}` : ''}${speed ? `, speed ${speed}` : ''}\n`);
-  console.log('  level  weapon           won  stalled  through  deaths/min  kills/min  %/min  starved');
+  console.log('  level  weapon           won  stalled  through  deaths/min  kills/min  %/min  starved  caught');
   for (const level of levels) {
     for (const id of ORDER) {
       const rs = [];
@@ -194,7 +195,8 @@ for (const tier of tiers) {
         `${pad(avg(r => r.deathsPerMin).toFixed(1), 12)}` +
         `${pad(avg(r => r.killsPerMin).toFixed(0), 11)}` +
         `${pad(avg(r => r.progPerMin).toFixed(1), 7)}` +
-        `${pad((avg(r => r.starved) * 100).toFixed(0) + '%', 9)}`);
+        `${pad((avg(r => r.starved) * 100).toFixed(0) + '%', 9)}` +
+        `${pad((avg(r => r.caught) * 100).toFixed(0) + '%', 8)}`);
     }
     if (levels.length > 1) console.log();
   }

@@ -522,6 +522,7 @@ export class Sim {
     this.enemyShots = [];
     this.kills = 0;
     this.picked = 0;
+    this.dropped = 0;           // how many were there to pick up
     this.rngState = 12345;
     // Whoever owns the simulation says what the script's music opcodes mean,
     // and what a sound is. Nothing here knows about audio; it only says when
@@ -579,6 +580,7 @@ export class Sim {
     drop.explode = kind.explode;
     drop.layer = kind.layer; drop.hits = kind.hits;
     this.drops.push(drop);
+    this.dropped++;
   }
 
   /**
@@ -2030,6 +2032,7 @@ export class Sim {
     this.score = prev.score;
     this.kills = prev.kills;
     this.picked = prev.picked;
+    this.dropped = prev.dropped;
     this.markerSlots = prev.markerSlots.slice();
     this.rngState = prev.rngState;
     this.inFlight = 0;

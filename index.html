@@ -232,6 +232,21 @@
     gap: 7px; min-height: 0; min-width: 0;
   }
   canvas { display: block; image-rendering: pixelated; }
+  /* The bot is flying. Bottom left, inside the frame and over the field, where
+     it cannot be mistaken for part of the game: the HUD is the game's, this is
+     the page talking. It breathes rather than blinks -- an attract mode runs
+     for minutes at a time and a blink at that length is a nag. */
+  #demo {
+    position: absolute; left: 8px; bottom: 8px; z-index: 2;
+    display: flex; align-items: baseline; gap: 8px;
+    font: 600 11px/1 var(--mono); letter-spacing: .16em;
+    text-transform: uppercase; pointer-events: none;
+  }
+  #demo b { color: var(--v-lit); animation: demo-breathe 2.6s ease-in-out infinite; }
+  #demo span { color: #8d8a99; letter-spacing: .08em; font-weight: 500; }
+  @keyframes demo-breathe { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
+  @media (prefers-reduced-motion: reduce) { #demo b { animation: none } }
+  @media (max-width: 600px) { #demo span { display: none } }
   /* `pixelated` at every setting, including the hi one. Letting the browser
      resample there was tried and it reads as a blur: the point of the baked
      sprites is that they are drawn with more pixels, not that the edges go
@@ -945,7 +960,9 @@
 </header>
 
 <div id="stage">
-  <div class="field-wrap"><div class="frame"><canvas id="field"></canvas></div></div>
+  <div class="field-wrap"><div class="frame"><canvas id="field"></canvas>
+    <div id="demo" hidden><b>DEMO</b><span>press any key to stop watching</span></div>
+  </div></div>
 </div>
 
 <!-- Something for a crawler to read. A game is a canvas and a canvas is opaque,

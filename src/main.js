@@ -1,5 +1,6 @@
 import { Clock } from './clock.js';
 import { Sim } from './sim.js';
+import { decide } from './autopilot.js';
 import { Renderer } from './render.js';
 import { Hud } from './hud.js';
 import { nebula } from './backdrop.js';
@@ -490,6 +491,9 @@ async function advance(n) {
   clock.resync();
   screen = 'playing';
   document.body.dataset.screen = screen;
+  if (demoBadge) demoBadge.hidden = !demo;
+  demoLives = sim.player.lives;
+  demoPc = sim.pc; demoPcAt = sim.tick;
   advancing = false;
 }
 
@@ -497,7 +501,9 @@ async function startGame() {
   shop.show(false);
   pause.show(false);
   pendingLevel = 0;
-  await loadLevel(startLevel);        // a new run always starts where the URL says
+  // A demo deals itself a level; everything else starts where the URL says.
+  const plan = demo ? dealDemo() : null;
+  await loadLevel(plan ? plan.level : startLevel);
   sim = new Sim(data);
   audio.start();
   // `?clock=11289600` is the pitch constant and `?loop=1` makes samples repeat.
@@ -517,7 +523,20 @@ async function startGame() {
   const heard = {};
   sim.onAudio = (op, v) => { heard[op] = v; };
   sim.skipGates = true;
-  if (warp === 'boss') {
+  // A dealt demo lands on a wave rather than at the top of the level: an
+  // attract loop that always opened on the same empty sky would be showing the
+  // loading, not the game. The stretch is measured on a scratch run rather than
+  // written down, so it holds for every level and survives the data changing.
+  let at = warp;
+  if (plan) {
+    if (plan.tick === null) {
+      const [first, end] = wavesIn(data);
+      const span = Math.max(0, end - first - 900);
+      plan.tick = Math.round(first + Math.random() * span);
+    }
+    at = plan.tick;
+  }
+  if (at === 'boss') {
     while (sim.tick < 40000 && !sim.entities.some(e => e.tpl.type === 33)) sim.step();
     // Getting here skipped every gate on the way, so a dozen waves a player
     // would have shot are still flying and their anchors are still dripping
@@ -527,7 +546,45 @@ async function startGame() {
     sim.enemyShots.length = 0;
     sim.drops.length = 0;
   } else {
-    for (let i = 0; i < warp; i++) sim.step();
+    for (let i = 0; i < at; i++) sim.step();
+    // Landing anywhere but the top of a level means every gate on the way was
+    // skipped, and a gate is what the level uses to say "this wave is over".
+    // So a dozen waves a player would have shot down are still on the field
+    // with their anchors alive, and an anchor never stops: `stepAnchor` adds a
+    // member every `interval` ticks and winds that interval down to 560, each
+    // arrival `hardened` -- a quarter of its hit points as ram damage, half the
+    // reload. Left alone, the demo fills with elites from waves that are not
+    // happening any more.
+    //
+    // The program says which wave *is* happening: the next gate names the slot
+    // it is waiting on. Everything that is not that wave is a leftover, and the
+    // ship was flown through their part of the level without firing a shot.
+    if (plan) {
+      // The program says which wave *is* happening: the next gate names the
+      // slot it is waiting on, and the registry says which anchor is in that
+      // slot now. Not the slot number on its own -- a level reuses one slot for
+      // every wave it has, so on level 5 all twelve anchors answer to 0 and
+      // keeping "the ones in the gate's slot" kept every one of them.
+      // `sub_3b4d` binds a member to its anchor at birth, so an object belongs
+      // to the wave it was born into and the current wave is exactly the
+      // registered anchor and the members pointing at it.
+      const gate = sim.prog.slice(sim.pc).find(op => op[0] === 'g');
+      const wave = gate ? sim.anchors[gate[1]] : null;
+      for (const e of sim.entities) {
+        if (e.tpl.type === 10) continue;                   // the backdrop
+        if (e === wave || (wave && e.anchor === wave)) continue;
+        e.dead = true;
+        // An anchor is emptied rather than only killed: `sub_2738` reads a
+        // gate's answer out of the registry, so one left in it still counting
+        // members would block the next gate on that slot for ever.
+        if (e.tpl.type === 11) {
+          e.alive = 0;
+          if (sim.anchors[e.tpl.anchorSlot] === e) delete sim.anchors[e.tpl.anchorSlot];
+        }
+      }
+      sim.enemyShots.length = 0;
+      sim.drops.length = 0;
+    }
   }
   sim.skipGates = q.has('nogates');
   clock.tick = sim.tick;
@@ -538,7 +595,7 @@ async function startGame() {
   // The warp is a debugging fast-forward, not a run: it flies the ship through
   // everything the level throws with nobody steering, so it arrives dead and
   // the program may have run off its end. Land at that moment ready to play.
-  if (warp) {
+  if (at) {
     sim.won = false;
     sim.player.lives = data.player.lives;
     sim.player.hp = sim.player.maxHp;
@@ -549,7 +606,22 @@ async function startGame() {
     sim.player.px = sim.player.x; sim.player.py = sim.player.y;
     sim.enemyShots.length = 0;
   }
-  if (q.has('weapon')) { sim.player.weapon = null; sim.player.equip(Number(q.get('weapon')), sim); }
+  if (q.has('weapon') || plan) {
+    const id = plan ? plan.weapon : Number(q.get('weapon'));
+    sim.player.weapon = null;
+    sim.player.equip(id, sim);
+    if (plan) {
+      // At its cap, which is what " WEAPON BOOST " walks a gun up to and what a
+      // player is holding by the time these waves come round. The magazine goes
+      // with it: `equip` leaves two volleys, the amount a gun just picked up
+      // carries, and a demo opening on an empty gun shows the reload and not
+      // the game.
+      const P = data.player, w = P.weapons[id];
+      sim.player.damage = Math.round(w.damage * P.weaponUpCap);
+      sim.player.fireEvery = P.fireEveryMin;
+      sim.player.ammo = w.mag;
+    }
+  }
   if (q.has('item')) sim.collect(Number(q.get('item')));
   globalThis.sim = sim;
   globalThis.dbg.sim = sim;
@@ -558,6 +630,9 @@ async function startGame() {
   if (menu) menu.show(false);
   over.show(false);
   document.body.dataset.screen = screen;
+  if (demoBadge) demoBadge.hidden = !demo;
+  demoLives = sim.player.lives;
+  demoPc = sim.pc; demoPcAt = sim.tick;
 }
 
 function toMenu() {
@@ -603,6 +678,12 @@ const q = new URLSearchParams(location.search);
 // the greeting and the announcements in front of it were dead air worth
 // skipping while debugging -- but with the empty waits cut the opening is short
 // enough to play, and it is what the level actually begins with.
+// ?demo=1 hands the ship to the bot in `autopilot.js` -- the same brain the
+// weapon sweep is flown with, so what it does here is what those numbers are
+// measuring. It plays the game's own rules: three lives, no gates skipped, and
+// when the run ends it starts again.
+let demo = q.get('demo') === '1';
+const demoBadge = document.getElementById('demo');
 const warp = q.has('tick')
   ? (q.get('tick') === 'boss' ? 'boss' : Number(q.get('tick')))
   : 0;
@@ -778,6 +859,15 @@ addEventListener('keydown', e => {
   // H likewise: the picture is not a thing you should have to leave a fight to
   // change your mind about.
   if (e.code === 'KeyH' && !e.repeat) { setHi(!hiOn); e.preventDefault(); return; }
+  // Any key ends the demo. It is a thing to watch, not a thing to play -- and
+  // this is the door the attract mode will need.
+  if (demo && screen === 'playing') {
+    demo = false;
+    if (demoBadge) demoBadge.hidden = true;
+    toMenu();
+    e.preventDefault();
+    return;
+  }
   if (screen === 'playing' && e.code === 'KeyB') { openShop(); e.preventDefault(); return; }
   if (screen === 'playing' && e.code === 'Escape') { openPause(); e.preventDefault(); return; }
   if (screen === 'menu') {
@@ -873,11 +963,91 @@ function drawExhaust(frame, x, y) {
   if (b) renderer.draw(b.hard, x, y + b.top, b.big);
 }
 
-const input = () => ({
-  dx: (held.has('r') ? 1 : 0) - (held.has('l') ? 1 : 0),
-  dy: (held.has('d') ? 1 : 0) - (held.has('u') ? 1 : 0),
-  fire: held.has('f'),
-});
+const input = () => {
+  // The bot only has an opinion while the ship is flying. Coming in, dying and
+  // waiting are the same for it as for a player: nothing to decide.
+  if (demo && sim.player.state === 'fly' && sim.player.gun) {
+    const a = decide(sim, sim.player.gun);
+    return { dx: a.dx, dy: 0, fire: a.fire };
+  }
+  return {
+    dx: (held.has('r') ? 1 : 0) - (held.has('l') ? 1 : 0),
+    dy: (held.has('d') ? 1 : 0) - (held.has('u') ? 1 : 0),
+    fire: held.has('f'),
+  };
+};
+
+/**
+ * What the end of a run means with nobody watching the keyboard.
+ *
+ * No end screen and no name prompt: on to the next level if the bot won one,
+ * and back to the start if it did not. `demoBusy` is the guard `advancing` is
+ * for the player's path -- both of these await three fetches, and the frame
+ * loop would call this again on every frame in between.
+ */
+/**
+ * Anything on the field the demo should not be in the middle of.
+ *
+ * The asteroid belt is an emitter and a boss is a type 33 core with its wings
+ * and guns; neither is a wave, and neither is what a thirty-second look at the
+ * game should open on. Reaching one is a reason to cut and deal again, not a
+ * thing to fly through.
+ */
+const hazard = (s) => s.entities.some(
+  e => !e.dead && (e.tpl.emitter || e.tpl.type >= 33));
+
+/**
+ * How far into a level the waves run before the first of those.
+ *
+ * Run on a scratch simulation with the gates skipped, which is the same
+ * fast-forward `?tick=` uses, and with the ship made unkillable so that a run
+ * with nobody steering does not stall at the `ship_in` that blocks until it is
+ * back. Returns the tick the first wave is on screen and the tick the safe
+ * stretch ends, so a demo can be dealt anywhere between them.
+ */
+function wavesIn(d) {
+  const s = new Sim(d);
+  s.skipGates = true;
+  s.player.lives = 9999;
+  let first = 0;
+  while (s.tick < 40000) {
+    s.step();
+    if (!first && s.entities.some(e => !e.dead && e.tpl.drawn && (e.tpl.layer & 0x40)))
+      first = s.tick;
+    if (s.won || hazard(s)) break;
+  }
+  return [first || 200, s.tick];
+}
+
+/**
+ * A hand for the demo: a level, a wave in it, and a gun at its cap.
+ *
+ * Random, because the point of an attract loop is that the second look is not
+ * the first one -- but never over anything the URL has already named, so
+ * `?demo=1&level=5&weapon=1061` still means exactly what it says.
+ */
+let demoPlan = null, demoLives = 0, demoPc = -1, demoPcAt = 0;
+function dealDemo() {
+  const P = data.player;
+  const ids = Object.keys(P.weapons).map(Number);
+  demoPlan = {
+    level: q.has('level') ? startLevel : 1 + Math.floor(Math.random() * 8),
+    weapon: q.has('weapon') ? Number(q.get('weapon'))
+                            : ids[Math.floor(Math.random() * ids.length)],
+    tick: q.has('tick') ? warp : null,        // null means "pick one once loaded"
+  };
+  return demoPlan;
+}
+
+let demoBusy = false;
+async function demoNext() {
+  if (demoBusy || advancing) return;
+  demoBusy = true;
+  try {
+    if (!demoPlan && sim.won && level < 8) await advance(level + 1);
+    else await startGame();
+  } finally { demoBusy = false; }
+}
 
 let fps = 0, fpsT = performance.now(), fpsN = 0, hudTick = -1, statsT = 0, hudT = 0;
 
@@ -887,7 +1057,20 @@ function frame() {
     // The last life ends the run. `sub_3538` puts up the original's own screen;
     // this is ours. Running off the end of the level program is the other way
     // out -- the boss is down and the section's outro has played.
-    if (sim.player.state === 'over' || sim.won) endScreen();
+    if (sim.player.state === 'over' || sim.won) {
+      if (demo) demoNext(); else endScreen();
+    } else if (demoPlan && demo) {
+      // A death, the asteroid belt or a boss: deal again rather than show the
+      // respawn, the rocks or a fight the bot was not put here for.
+      if (sim.player.lives < demoLives || hazard(sim)) demoNext();
+      // And a hand that is going nowhere. A wave reinforces, so a gun that
+      // kills at about the rate the anchor rebuilds holds the level's program
+      // on one gate indefinitely -- true of the game and fine to lose a run
+      // to, but nothing to watch for half a minute. Thirty-five seconds on the
+      // same opcode is a new deal.
+      else if (sim.pc !== demoPc) { demoPc = sim.pc; demoPcAt = sim.tick; }
+      else if (sim.tick - demoPcAt > 2500) demoNext();
+    }
   }
   const a = clock.alpha;
 
@@ -961,7 +1144,7 @@ function frame() {
 }
 // Straight into the game when a debug flag says which moment to look at;
 // otherwise the menu, which is what a player sees.
-if (!menu || q.has('tick') || q.has('nogates')) startGame();
+if (!menu || q.has('tick') || q.has('nogates') || demo) startGame();
 else { document.body.dataset.screen = 'menu'; menu.show(true); }
 requestAnimationFrame(frame);
 

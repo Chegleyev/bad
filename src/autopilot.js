@@ -134,28 +134,101 @@ function threat(sim, xs) {
 }
 
 /**
- * How much the ship wants to be at `x` to *catch* something.
+ * What is falling, and what it is worth catching -- gathered once a tick.
  *
- * A falling prize is worth going for, and going for them is most of what a real
- * run does: WEAPON BOOST is where the magazine comes from, and without chasing
- * them the bot starves at ninety per cent and no weapon can be told from any
- * other. Weighted by how soon it lands, so a prize about to leave the screen
- * pulls harder than one that just dropped.
+ * Not everything on the way down is a prize. " SIDE SPEED DOWN " and the
+ * confiscator are worth *dodging*, and a pickup with nothing left to give is
+ * worth the fifty credits the shop pays for it and no detour. `Sim.spare` is
+ * the same test the shop greys an item out with, so the bot wants exactly what
+ * a player would want at that moment: ammo when the magazine has room, a gun
+ * when it is not already at its cap.
  */
-function want(sim, x) {
-  const p = sim.player;
-  const py = p.y / FP;
-  let best = 0;
+const WORTH = {
+  weapon: 1, extraLife: 1, repair: 0.9, ammo: 0.85, sideUp: 0.8,
+  megablast: 0.5, paralyser: 0.5, boost: 0.5, marker: 0.55,
+  creditDouble: 0.4, credits: 0.3, randomizer: 0.1,
+  sideDown: -1, weaponReset: -1,
+};
+
+/**
+ * Where each gun sits on the ladder, counted along the `prev` links the data
+ * already carries: cannon 0, phaser 1, blaster 2, annihilator 3, trident 4.
+ */
+function rungs(P) {
+  if (P.rung) return P.rung;
+  const rung = {};
+  for (const key of Object.keys(P.weapons)) {
+    let id = Number(key), n = 0;
+    while (n < 8) {
+      const prev = P.weapons[id] && P.weapons[id].prev;
+      if (!prev || prev === id || !P.weapons[prev]) break;
+      id = prev; n++;
+    }
+    rung[key] = n;
+  }
+  return (P.rung = rung);
+}
+
+function prizes(sim) {
+  const P = sim.data.player;
+  const out = [];
   for (const d of sim.drops) {
     if (d.dead) continue;
-    const dy = py - d.y / FP;
+    const f = sim.frameOf(d.sprite);
+    if (!f) continue;
+    const effect = P.effects[d.item];
+    let worth = WORTH[effect] ?? 0.3;
+    // A gun is only a prize if it is not a demotion. `Player.equip` replaces
+    // the gun outright when the id differs -- damage back to the template's,
+    // magazine back to two volleys -- so a cannon picked up while holding a
+    // maxed annihilator throws the whole run away. It happened on screen, and
+    // it is worth avoiding as hard as the confiscator, which is the same event
+    // by another name.
+    if (effect === 'weapon') {
+      const id = P.weaponOf[d.item], p = sim.player;
+      const rung = rungs(P);
+      if (p.weapon === id) worth = 0.9;               // another boost for this one
+      else if ((rung[id] ?? 0) > (rung[p.weapon] ?? 0)) worth = 1;
+      else worth = -1;
+    }
+    // Nothing left to give: the port pays 50 credits for it, which is worth
+    // having and not worth crossing the screen for.
+    if (worth > 0 && sim.spare(d.item)) worth = 0.25;
+    // An empty gun wants ammo more than it wants anything else on the field.
+    if (effect === 'ammo' && sim.player.gun &&
+        sim.player.ammo < sim.player.gun.barrels.length * 2) worth = 1.2;
+    out.push({
+      x: d.x / FP, y: d.y / FP, w: f.w, h: f.h, hp: Math.max(1, d.hp ?? 80),
+      vx: (d.vx ?? 0) / FP, vy: Math.max(0.2, (d.vy ?? 0) / FP), worth,
+    });
+  }
+  return out;
+}
+
+/**
+ * How much the ship wants to be at `x`: under something worth catching, and
+ * out from under something that is not.
+ *
+ * Going for the prizes is most of what a real run does -- WEAPON BOOST is where
+ * the magazine comes from -- and it is most of what a demo is *for*: a bot that
+ * flies past the thing the level just dropped does not look like someone
+ * playing. Weighted by how soon it lands, so a prize about to leave the screen
+ * pulls harder than one that just dropped.
+ */
+function want(sim, x, przs) {
+  const py = sim.player.y / FP;
+  let best = 0;
+  for (const d of przs) {
+    const dy = py - d.y;
     if (dy < -20) continue;                           // already past us
-    const vy = Math.max(0.2, (d.vy ?? 0) / FP);
-    const ticks = dy / vy;
-    const cross = d.x / FP + ((d.vx ?? 0) / FP) * ticks;
+    const ticks = dy / d.vy;
+    const cross = d.x + d.w / 2 + d.vx * ticks;
     const gap = Math.abs(cross - (x + SHIP_W / 2));
     const reach = 1 - Math.min(1, gap / 70);
-    best = Math.max(best, reach * (ticks < 200 ? 1 : 0.4));
+    const pull = d.worth * reach * (ticks < 200 ? 1 : 0.4);
+    // A bad pickup is a thing to be elsewhere for, and the nearer the ship is
+    // to catching it the worse the place is.
+    best = d.worth < 0 ? Math.min(best, pull) : Math.max(best, pull);
   }
   return best;
 }
@@ -243,6 +316,70 @@ function volleyValue(sim, x, gun, tgts) {
   return value;
 }
 
+/**
+ * Is a volley from `x` about to break a prize the ship is on its way to catch?
+ *
+ * The player's own bullets damage a pickup like anything else -- `Sim.step`
+ * runs them through the same collision -- so the gun that clears the wave is
+ * also the gun that shoots away what the wave dropped, and the ship has to be
+ * directly under a drop to catch it, which is exactly where its own shots go.
+ * Someone playing stops firing for a moment and takes the prize.
+ *
+ * A moment, and no more. Pricing every crossing on the field as a lost prize
+ * was tried both ways -- as a cost set against the kill, and as a term in the
+ * steering -- and both were expensive for nothing. Drops fall from where the
+ * next target is, so nearly every shot on the field crosses one and the gun
+ * goes quiet; and in the steering it fought `want` directly, since the place to
+ * catch a prize is the place its shots cross it, so the ship did neither.
+ *
+ * This asks a much narrower question: low on the screen, in this ship's own
+ * column, arriving within half a second. That is the prize an onlooker watches
+ * get shot away, and pausing for it costs a few ticks of fire.
+ */
+function wouldBreakPrize(sim, x, gun, przs) {
+  if (!przs.length) return false;
+  const [mx, my] = sim.data.player.muzzle;
+  const py = sim.player.y / FP;
+  for (const b of gun.barrels) {
+    const sx = x + mx + b.dx, sy = py + my + b.dy;
+    const f = sim.frameOf(b.frm);
+    const sw = f ? f.w : 4;
+    for (const d of przs) {
+      if (d.worth < 0.5) continue;                    // not worth a pause
+      if (py - d.y > 110) continue;                   // nobody's prize yet
+      const rel = b.vy - d.vy;
+      if (rel >= -0.01) continue;
+      const tt = (d.y + d.h / 2 - sy) / rel;
+      if (tt < 0 || tt > 26) continue;
+      const shotX = sx + b.vx * tt + sw / 2;
+      const dx = d.x + d.vx * tt + d.w / 2;
+      if (Math.abs(shotX - dx) <= (d.w + sw) / 2) return true;
+    }
+  }
+  return false;
+}
+
+
+/**
+ * How much closer to something worth shooting the ship would be at `x`.
+ *
+ * The exact test answers only inside the ship's reach: the trajectory runs
+ * ninety ticks, which at a top speed of one pixel a tick is seventy pixels, and
+ * a fly three hundred pixels away scores zero from every direction. So the
+ * ship stood at one edge of the field firing into the ceiling while the last
+ * enemy of the wave circled at the other -- the same blindness as before, one
+ * horizon further out. This is the long-range half: a plain pull toward the
+ * best target, weak enough that it never argues with a real firing solution or
+ * with getting out of the way, and present at any distance.
+ */
+function approach(sim, x, tgts) {
+  let best = 0;
+  for (const t of tgts) {
+    const d = Math.abs(t.x + t.w / 2 - (x + SHIP_W / 2));
+    best = Math.max(best, t.urgent * (1 - Math.min(1, d / 300)));
+  }
+  return best;
+}
 
 /**
  * Left, nothing or right -- and whether to pull the trigger.
@@ -255,7 +392,8 @@ function volleyValue(sim, x, gun, tgts) {
  */
 function decide(sim, gun) {
   const tgts = targets(sim);
-  let bestDx = 0, bestScore = -Infinity;
+  const przs = prizes(sim);
+  const scores = [];
   for (const dx of [-1, 0, 1]) {
     const xs = traj(sim, dx, HORIZON);
     // A firing solution anywhere along the trajectory, not only at the near end
@@ -274,18 +412,51 @@ function decide(sim, gun) {
     // it costs a life, a rung of the weapon ladder and half a unit of speed,
     // and the speed never comes back. Eight volleys is the exchange rate, and
     // a bot that will not take that trade is a bot that lives.
-    const s = value
-            + want(sim, xs[14]) * 0.5
-            - threat(sim, xs) * 8;
-    if (s > bestScore) { bestScore = s; bestDx = dx; }
+    scores.push(value
+              + approach(sim, xs[HORIZON], tgts) * 0.3
+              + want(sim, xs[14], przs) * 1.8
+              - threat(sim, xs) * 8);
   }
+
+  // Commitment, because the scores are recomputed from scratch seventy times a
+  // second and two of them are usually within a hair of each other. Taking the
+  // best one every tick reads as a twitch -- the ship shivers between left and
+  // right while standing still, which no human hand does and which was the
+  // first thing anyone said about watching it play. So a new direction has to
+  // be *better* than the one being held, by a margin that is wide while the
+  // current one is fresh and narrows as it goes stale. Precision costs a
+  // little; it is a trade worth making for a ship that looks steered.
+  const st = sim.bot || (sim.bot = { dx: 0, at: -99 });
+  let best = 0;
+  for (let i = 1; i < 3; i++) if (scores[i] > scores[best]) best = i;
+  const bestDx = best - 1;
+  const held = scores[st.dx + 1];
+  const fresh = sim.tick - st.at < 6;
+  if (bestDx !== st.dx && scores[best] - held > (fresh ? 0.3 : 0.07)) {
+    st.dx = bestDx;
+    st.at = sim.tick;
+  }
+
   const p = sim.player;
   // A round is only free when the magazine is full: `sub_3641` hands one back
   // when a shot dies, so a round spent on empty sky is a round that is not
   // there for the next thing that matters.
+  // What the volley would break is a question for the trigger, never for the
+  // steering: the place the ship wants to be to *catch* a prize is exactly the
+  // place its own shots cross it, so subtracting the one from the other left
+  // `want` pulling the ship under a drop and the risk pushing it back out, and
+  // the two cancelled into a ship that did neither.
   const spare = p.ammo >= gun.mag - gun.barrels.length;
-  const fire = spare || volleyValue(sim, p.x / FP, gun, tgts) > 0;
-  return { dx: bestDx, fire };
+  const here = volleyValue(sim, p.x / FP, gun, tgts);
+  // A full magazine is a reason to fire at what the prediction is not sure of,
+  // not a reason to fire at the sky. Something has to be overhead: firing
+  // across an empty screen at a fly three hundred pixels away is not a shot a
+  // player would take, and it is the first thing that looks wrong watching it.
+  const overhead = tgts.some(
+    t => Math.abs(t.x + t.w / 2 - (p.x / FP + SHIP_W / 2)) < 80);
+  const fire = (here > 0 || (spare && overhead)) &&
+               !wouldBreakPrize(sim, p.x / FP, gun, przs);
+  return { dx: st.dx, fire };
 }
 
 export { decide, traj, threat, want, targets, volleyValue, HORIZON };
