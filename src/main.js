@@ -341,6 +341,17 @@ for (const [id, which] of [['pseudos', 'pseudos'], ['webfoot', 'webfoot']])
 // A card sits inside the field's frame, so a click beside it never reaches it.
 // While one is up, the whole page dismisses it.
 addEventListener('click', () => { if (intro.showing) intro.advance(); });
+// The badge says "press any key", and a click is one: an attract loop that
+// ignored the mouse would be a page that looks broken to anyone who reaches for
+// it rather than for the keyboard.
+addEventListener('pointerdown', () => {
+  if (!demo || screen !== 'playing') return;
+  demo = false;
+  demoPlan = null;
+  if (demoBadge) demoBadge.hidden = true;
+  toMenu();
+  idleSince = performance.now();
+});
 // What the script last handed to the driver, so the intro can hand it back.
 let lastBank = 0;
 
@@ -684,6 +695,18 @@ const q = new URLSearchParams(location.search);
 // when the run ends it starts again.
 let demo = q.get('demo') === '1';
 const demoBadge = document.getElementById('demo');
+// A menu nobody has touched for three quarters of a minute plays the game to
+// itself, which is what the cabinet this is descended from did with the floor
+// empty. `?demo=0` turns it off -- for a screenshot, or for reading the credits
+// slowly. `?demo=1` is the other door: straight in, no waiting.
+const ATTRACT_AFTER = 45000;
+const attract = q.get('demo') !== '0';
+let idleSince = performance.now();
+const stirred = () => { idleSince = performance.now(); };
+addEventListener('keydown', stirred, true);
+addEventListener('pointerdown', stirred, true);
+addEventListener('pointermove', stirred, true);
+addEventListener('wheel', stirred, { capture: true, passive: true });
 const warp = q.has('tick')
   ? (q.get('tick') === 'boss' ? 'boss' : Number(q.get('tick')))
   : 0;
@@ -863,8 +886,10 @@ addEventListener('keydown', e => {
   // this is the door the attract mode will need.
   if (demo && screen === 'playing') {
     demo = false;
+    demoPlan = null;
     if (demoBadge) demoBadge.hidden = true;
     toMenu();
+    idleSince = performance.now();
     e.preventDefault();
     return;
   }
@@ -1052,6 +1077,13 @@ async function demoNext() {
 let fps = 0, fpsT = performance.now(), fpsN = 0, hudTick = -1, statsT = 0, hudT = 0;
 
 function frame() {
+  // Nothing has happened on the menu for long enough: hand the ship to the bot.
+  if (attract && !demo && !demoBusy && screen === 'menu' && !intro.showing &&
+      performance.now() - idleSince > ATTRACT_AFTER) {
+    demo = true;
+    demoBusy = true;
+    startGame().finally(() => { demoBusy = false; });
+  }
   if (screen === 'playing') {
     clock.advance(() => sim.step(input()));
     // The last life ends the run. `sub_3538` puts up the original's own screen;

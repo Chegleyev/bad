@@ -232,21 +232,33 @@
     gap: 7px; min-height: 0; min-width: 0;
   }
   canvas { display: block; image-rendering: pixelated; }
-  /* The bot is flying. Bottom left, inside the frame and over the field, where
-     it cannot be mistaken for part of the game: the HUD is the game's, this is
-     the page talking. It breathes rather than blinks -- an attract mode runs
-     for minutes at a time and a blink at that length is a nag. */
+  /* The bot is flying. Across the top, inside the frame and over the field,
+     where it cannot be mistaken for part of the game: the HUD is the game's,
+     this is the page talking. The sky up there is empty in every level -- waves
+     enter from above but the top forty pixels are where they are still coming
+     in, so a line of type sits over nothing that matters. It breathes rather
+     than blinks: an attract loop runs for minutes and a blink at that length
+     is a nag. */
   #demo {
-    position: absolute; left: 8px; bottom: 8px; z-index: 2;
-    display: flex; align-items: baseline; gap: 8px;
-    font: 600 11px/1 var(--mono); letter-spacing: .16em;
-    text-transform: uppercase; pointer-events: none;
+    position: absolute; left: 0; right: 0; top: clamp(8px, 1.6vh, 20px);
+    z-index: 2; display: flex; flex-direction: column; align-items: center;
+    gap: 6px; font-family: var(--mono); line-height: 1.2;
+    text-transform: uppercase;
+    pointer-events: none; text-align: center;
   }
-  #demo b { color: var(--v-lit); animation: demo-breathe 2.6s ease-in-out infinite; }
-  #demo span { color: #8d8a99; letter-spacing: .08em; font-weight: 500; }
-  @keyframes demo-breathe { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
+  #demo b {
+    font-size: clamp(18px, 2.1vw, 32px); font-weight: 600; letter-spacing: .42em;
+    /* the letter-spacing pads the right; take half of it back to stay centred */
+    text-indent: .42em;
+    color: var(--v-lit); text-shadow: 0 2px 14px #0b0a12, 0 0 3px #0b0a12;
+    animation: demo-breathe 2.6s ease-in-out infinite;
+  }
+  #demo span {
+    font-size: clamp(9px, .82vw, 13px); font-weight: 500; letter-spacing: .1em;
+    color: #a8a4b8; text-shadow: 0 1px 8px #0b0a12, 0 0 3px #0b0a12;
+  }
+  @keyframes demo-breathe { 0%, 100% { opacity: 1 } 50% { opacity: .45 } }
   @media (prefers-reduced-motion: reduce) { #demo b { animation: none } }
-  @media (max-width: 600px) { #demo span { display: none } }
   /* `pixelated` at every setting, including the hi one. Letting the browser
      resample there was tried and it reads as a blur: the point of the baked
      sprites is that they are drawn with more pixels, not that the edges go
@@ -961,7 +973,7 @@
 
 <div id="stage">
   <div class="field-wrap"><div class="frame"><canvas id="field"></canvas>
-    <div id="demo" hidden><b>DEMO</b><span>press any key to stop watching</span></div>
+    <div id="demo" hidden><b>DEMO</b><span>press any key to return to the menu</span></div>
   </div></div>
 </div>
 
