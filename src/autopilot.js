@@ -361,22 +361,43 @@ function wouldBreakPrize(sim, x, gun, przs) {
 
 
 /**
- * How much closer to something worth shooting the ship would be at `x`.
+ * How much closer to a shot the ship would be at `x` -- measured per barrel.
  *
- * The exact test answers only inside the ship's reach: the trajectory runs
- * ninety ticks, which at a top speed of one pixel a tick is seventy pixels, and
- * a fly three hundred pixels away scores zero from every direction. So the
- * ship stood at one edge of the field firing into the ceiling while the last
- * enemy of the wave circled at the other -- the same blindness as before, one
- * horizon further out. This is the long-range half: a plain pull toward the
- * best target, weak enough that it never argues with a real firing solution or
- * with getting out of the way, and present at any distance.
+ * The exact hit test answers only inside the ship's reach: the trajectory runs
+ * ninety ticks, which at a top speed of one pixel a tick is seventy pixels, so
+ * a fly three hundred pixels away scores zero from every direction and the ship
+ * stands there. This is the long-range half, and it is weapon-aware on purpose.
+ *
+ * Not the distance to the target -- the distance to the place from which *this
+ * gun* would hit it. An annihilator throws four barrels nine pixels either side
+ * of the hull and lands something from almost anywhere it stands; a phaser has
+ * two and a cannon one, straight ahead, and has to be under the thing. Pulling
+ * both toward the target's centre told the cannon that being roughly nearby was
+ * as good as being lined up, so it drifted around the middle of the field
+ * firing at nothing: it starved at 16% where the annihilator starved at 61%,
+ * which is not a gun that cannot keep up -- it is a gun that never shoots.
+ *
+ * So each barrel is solved for the ship position that would put its shot on the
+ * target when it arrives, and the pull is toward the nearest of those. A wide
+ * gun gets four answers and is near one of them already; a narrow gun gets one,
+ * and is told at any distance exactly where to be.
  */
-function approach(sim, x, tgts) {
+function approach(sim, x, gun, tgts) {
+  const [mx, my] = sim.data.player.muzzle;
+  const py = sim.player.y / FP;
   let best = 0;
   for (const t of tgts) {
-    const d = Math.abs(t.x + t.w / 2 - (x + SHIP_W / 2));
-    best = Math.max(best, t.urgent * (1 - Math.min(1, d / 300)));
+    for (const b of gun.barrels) {
+      const rel = b.vy - t.vy;
+      if (rel >= -0.01) continue;
+      const f = sim.frameOf(b.frm);
+      const sw = f ? f.w : 4;
+      const tt = (t.y + t.h / 2 - (py + my + b.dy)) / rel;
+      if (tt < 0 || tt > 200) continue;
+      // where the ship has to be for this barrel's shot to arrive on the target
+      const spot = t.x + t.vx * tt + t.w / 2 - (mx + b.dx + b.vx * tt + sw / 2);
+      best = Math.max(best, t.urgent * (1 - Math.min(1, Math.abs(x - spot) / 300)));
+    }
   }
   return best;
 }
@@ -413,7 +434,7 @@ function decide(sim, gun) {
     // and the speed never comes back. Eight volleys is the exchange rate, and
     // a bot that will not take that trade is a bot that lives.
     scores.push(value
-              + approach(sim, xs[HORIZON], tgts) * 0.3
+              + approach(sim, xs[HORIZON], gun, tgts) * 0.45
               + want(sim, xs[14], przs) * 1.8
               - threat(sim, xs) * 8);
   }
@@ -454,7 +475,23 @@ function decide(sim, gun) {
   // player would take, and it is the first thing that looks wrong watching it.
   const overhead = tgts.some(
     t => Math.abs(t.x + t.w / 2 - (p.x / FP + SHIP_W / 2)) < 80);
-  const fire = (here > 0 || (spare && overhead)) &&
+  // And a barrel that is lined up *now* fires, whatever the prediction thinks.
+  // The prediction flies the target in a straight line, and these things are on
+  // curved paths: over the eighty ticks a shot takes to cross the screen the
+  // extrapolation is a guess, and demanding it agree is how a one-barrel gun
+  // ends up holding its fire with a fly directly overhead. A player shoots when
+  // it looks lined up and accepts missing some.
+  const [mx] = sim.data.player.muzzle;
+  // Kept honest by the magazine: a speculative shot is only worth it with two
+  // volleys still in hand. Without that the blaster's three barrels fired at
+  // everything that looked close and it starved at 82%, up from 42%.
+  const loaded = p.ammo >= gun.barrels.length * 2;
+  const lined = loaded && tgts.some(t => gun.barrels.some(b => {
+    const f = sim.frameOf(b.frm);
+    return Math.abs(t.x + t.w / 2 - (p.x / FP + mx + b.dx + (f ? f.w : 4) / 2))
+           <= t.w / 2 + 10;
+  }));
+  const fire = (here > 0 || lined || (spare && overhead)) &&
                !wouldBreakPrize(sim, p.x / FP, gun, przs);
   return { dx: st.dx, fire };
 }
