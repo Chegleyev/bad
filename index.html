@@ -246,6 +246,11 @@
     text-transform: uppercase;
     pointer-events: none; text-align: center;
   }
+  /* An id with a `display` on it beats the browser's own `[hidden]` rule, which
+     is a plain attribute selector -- so the badge sat over the menu and over
+     everybody's first game with `hidden` faithfully set on it the whole time.
+     The same trap `.intro` and `.screen` are already spelled out for. */
+  #demo[hidden] { display: none; }
   #demo b {
     font-size: clamp(18px, 2.1vw, 32px); font-weight: 600; letter-spacing: .42em;
     /* the letter-spacing pads the right; take half of it back to stay centred */
