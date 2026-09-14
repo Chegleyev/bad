@@ -52,12 +52,17 @@ void main() {
 // rate. This way the sprite work is fixed at 112 000 pixels however big the
 // window is, and the only full-size pass is one textured quad with no discard.
 const BLIT_VS = `#version 300 es
+in vec2 aPos;                 // 0, 0 / 2, 0 / 0, 2 -- one oversized triangle
 out vec2 vUV;
 void main() {
-  // A single oversized triangle; no vertex buffer needed.
-  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
-  vUV = p;
-  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+  // It was built from gl_VertexID with no buffer at all, which is tidy and
+  // is a trap: a draw with no array enabled at attribute 0 sends desktop GL
+  // down an emulation path, and Firefox on macOS says so in as many words --
+  // "forces the browser to do expensive emulation work". This pass runs every
+  // frame the moment the upscaled sprites are on, which is the default. Three
+  // vertices in a buffer cost nothing and keep every draw on the fast path.
+  vUV = aPos;
+  gl_Position = vec4(aPos * 2.0 - 1.0, 0.0, 1.0);
 }`;
 
 const BLIT_FS = `#version 300 es
@@ -104,6 +109,14 @@ export class Renderer {
     const prog = this.prog = gl.createProgram();
     gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, VS));
     gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, FS));
+    // Before linking, and not optional. Which location an `in` gets is the
+    // linker's to choose unless it is told, and the buffer below is laid out
+    // by hand at 0, 1, 2 -- position, texture coordinate, which atlas. Two
+    // implementations that number them differently would both be right, and
+    // one of them would draw the vertex positions as the atlas selector.
+    gl.bindAttribLocation(prog, 0, 'aPos');
+    gl.bindAttribLocation(prog, 1, 'aUV');
+    gl.bindAttribLocation(prog, 2, 'aSrc');
     gl.linkProgram(prog);
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
     gl.useProgram(prog);
@@ -163,11 +176,19 @@ export class Renderer {
     const blit = this.blit = gl.createProgram();
     gl.attachShader(blit, compile(gl, gl.VERTEX_SHADER, BLIT_VS));
     gl.attachShader(blit, compile(gl, gl.FRAGMENT_SHADER, BLIT_FS));
+    gl.bindAttribLocation(blit, 0, 'aPos');
     gl.linkProgram(blit);
     if (!gl.getProgramParameter(blit, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(blit));
     gl.useProgram(blit);
     gl.uniform1i(gl.getUniformLocation(blit, 'uSrc'), 2);
-    this.blitVao = gl.createVertexArray();     // empty, but one must be bound
+    this.blitVao = gl.createVertexArray();
+    gl.bindVertexArray(this.blitVao);
+    this.blitVbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.blitVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 2, 0, 0, 2]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.bindVertexArray(null)
   }
 
   /**
