@@ -119,8 +119,49 @@ if (!import.meta.env) {
   }
   throw new Error('unbuilt: serve dist/, not the repository root');
 }
+/**
+ * Whatever goes wrong, say so on the page.
+ *
+ * The veil covers the whole window until there is something to look at, so a
+ * module that throws on the way up leaves a spinner and nothing else -- and
+ * "it loads but nothing works" is what the person on the other machine has to
+ * report instead of the reason. This paints the reason where they are already
+ * looking. It is also the only view anybody gets on a phone, where there is no
+ * console to open.
+ */
+function die(what, err) {
+  const veil = document.getElementById('boot');
+  if (!veil || veil.dataset.dead) return;
+  veil.dataset.dead = '1';
+  veil.classList.remove('gone');
+  veil.querySelector('.boot-ring')?.remove();
+  veil.querySelector('.boot-bar')?.remove();
+  const t = veil.querySelector('.boot-text');
+  if (!t) return;
+  t.classList.remove('pix');
+  t.style.cssText = 'font:400 12px/1.6 var(--mono);letter-spacing:.02em;color:var(--v-lit);'
+                  + 'text-align:left;max-width:70ch;white-space:pre-wrap;word-break:break-word';
+  t.textContent = `${what}
+
+${(err && (err.stack || err.message)) || err}`
+                + `
+
+${navigator.userAgent}
+
+Add ?diag=1 to the address for the full report.`;
+}
+addEventListener('error', (e) => die('Something threw.', e.error || e.message));
+addEventListener('unhandledrejection', (e) => die('Something failed to load.', e.reason));
+
 // BASE_URL keeps this correct in dev, in a build, and under a sub-path.
 const base = import.meta.env.BASE_URL;
+// `?diag=1` reports what the browser can do and stops: no game, no fetches.
+if (new URLSearchParams(location.search).get('diag') === '1') {
+  const { diagnose } = await import('./diag.js');
+  document.getElementById('boot')?.remove();
+  diagnose();
+  throw new Error('diag');           // nothing else on this page should run
+}
 // ?level=N picks one of the eight. Whether the tick rate is right will be
 // settled on the later levels -- if they are unpassable it is wrong -- so they
 // need to be reachable without playing through everything before them.
